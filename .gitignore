@@ -1,0 +1,19 @@
+# Python / Backend
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+chroma_db/
+logs/
+client_secret.json
+
+# Node / React Frontend
+rag-ui/node_modules/
+rag-ui/dist/
+npm-debug.log*
+
+# Environment Variables
+.env
