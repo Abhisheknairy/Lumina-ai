@@ -19,6 +19,8 @@ from .models import ChatSession, InteractionLog, SourceDocument
 
 # Allow HTTP for local testing
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+# Allow Google to return extra scopes (e.g. openid) without raising an error
+os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
 api = NinjaAPI(title="Lumina AI Django API")
 
@@ -29,7 +31,7 @@ BASE_DIR = CURRENT_DIR.parent
 CLIENT_SECRETS_FILE = str(BASE_DIR / "client_secret.json")
 CHROMA_PERSIST_DIR = str(BASE_DIR / "chroma_db")
 
-SCOPES = ['https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/userinfo.profile', 'https://www.googleapis.com/auth/userinfo.email']
+SCOPES = ['openid', 'https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/userinfo.profile', 'https://www.googleapis.com/auth/userinfo.email']
 REDIRECT_URI = "http://localhost:8000/api/auth/callback"
 
 # In-memory session storage (OAuth flow)
@@ -131,7 +133,9 @@ def ingest_item(request, user_id: str, item_id: str):
         return api.create_response(request, {"detail": "Not authenticated"}, status=401)
 
     from google.oauth2.credentials import Credentials
-    creds = Credentials(**user_sessions[user_id])
+    # Only pass OAuth credential keys — exclude profile fields like display_name, email
+    CRED_KEYS = {'token', 'refresh_token', 'token_uri', 'client_id', 'client_secret', 'scopes'}
+    creds = Credentials(**{k: v for k, v in user_sessions[user_id].items() if k in CRED_KEYS})
     service = build('drive', 'v3', credentials=creds)
 
     try:
