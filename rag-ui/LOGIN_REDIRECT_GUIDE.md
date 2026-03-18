@@ -64,7 +64,7 @@ app.use(cors());
 
 ### Current Flow:
 1. User clicks "Sign in with Google" on Login page (`/`)
-2. Frontend redirects to `http://localhost:8000/login?user_id=test_user_1`
+2. Frontend redirects to `http://localhost:8000/api/list-drive-items/?user_id=test_user_1`
 3. Backend handles OAuth and should redirect to `http://localhost:5173/callback?user_id=test_user_1`
 4. Frontend's OAuthCallback component (`/callback`) receives the `user_id`
 5. OAuthCallback redirects to `/dashboard?user_id=test_user_1`
@@ -83,7 +83,7 @@ app.use(cors());
 
 ### Step 1: Verify Backend is Running
 ```bash
-curl http://localhost:8000/login?user_id=test_user_1
+curl http://localhost:8000/api/list-drive-items/?user_id=test_user_1
 ```
 
 ### Step 2: Check Frontend is Running

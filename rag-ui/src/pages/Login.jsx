@@ -7,7 +7,11 @@ export default function Login() {
   const { isDark, toggleTheme } = useTheme();
   
   const handleGoogleLogin = () => {
-    window.location.href = 'http://localhost:8000/login?user_id=test_user_1';
+
+
+    // Corrected URL: Added /api/ before login
+    window.location.href = 'http://localhost:8000/api/login?user_id=test_user_1';
+
   };
 
   return (
