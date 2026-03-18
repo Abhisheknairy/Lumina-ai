@@ -1,44 +1,135 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Send, Loader2, Paperclip, Bot, 
-  FileText, ExternalLink, CheckCircle, AlertCircle, 
-  Sparkles, Clock, Zap, X
+  Send, Loader2, Paperclip, Bot,
+  FileText, ExternalLink, CheckCircle, AlertCircle,
+  Sparkles, Clock, Zap, X, TicketCheck
 } from 'lucide-react';
 import AppLayout from '../components/AppLayout';
+import DrivePicker from '../components/DrivePicker';
 
-// TicketButton Component
-function TicketButton({ message }) {
-  const [ticketState, setTicketState] = useState('idle');
-  const [ticketId, setTicketId] = useState(null);
+const API_BASE       = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || '';
+
+// ── Auth helper — injects Bearer <user_id> on every protected request ─
+// /api/get-token is the only endpoint called WITHOUT this (it's public,
+// needed before we know if the session is valid).
+function authFetch(userId, path, options = {}) {
+  return fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      'Authorization': `Bearer ${userId}`,
+    },
+  });
+}
+
+// UUID detection helper — never render a UUID as a display name
+function safeDisplayName(name) {
+  if (!name) return '';
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name);
+  return isUuid ? '' : name;
+}
+
+// ── SIMPLE MARKDOWN RENDERER ──────────────────────────────────────────
+function SimpleMarkdown({ text }) {
+  if (!text) return null;
+  const lines    = text.split('\n');
+  const elements = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith('```')) {
+      const codeLines = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith('```')) { codeLines.push(lines[i]); i++; }
+      elements.push(
+        <pre key={i} className="bg-gray-900 text-gray-100 rounded-xl p-4 overflow-x-auto text-sm my-3 font-mono">
+          <code>{codeLines.join('\n')}</code>
+        </pre>
+      );
+    } else if (line.startsWith('### ')) {
+      elements.push(<h3 key={i} className="font-bold text-base mt-4 mb-1">{line.slice(4)}</h3>);
+    } else if (line.startsWith('## ')) {
+      elements.push(<h2 key={i} className="font-bold text-lg mt-4 mb-1">{line.slice(3)}</h2>);
+    } else if (line.startsWith('# ')) {
+      elements.push(<h1 key={i} className="font-bold text-xl mt-4 mb-1">{line.slice(2)}</h1>);
+    } else if (line.match(/^[-*+] /)) {
+      const items = [];
+      while (i < lines.length && lines[i].match(/^[-*+] /)) {
+        items.push(<li key={i}>{inlineFormat(lines[i].slice(2))}</li>);
+        i++;
+      }
+      elements.push(<ul key={`ul-${i}`} className="list-disc list-inside space-y-1 my-2 text-sm">{items}</ul>);
+      continue;
+    } else if (line.match(/^\d+\. /)) {
+      const items = [];
+      while (i < lines.length && lines[i].match(/^\d+\. /)) {
+        items.push(<li key={i}>{inlineFormat(lines[i].replace(/^\d+\. /, ''))}</li>);
+        i++;
+      }
+      elements.push(<ol key={`ol-${i}`} className="list-decimal list-inside space-y-1 my-2 text-sm">{items}</ol>);
+      continue;
+    } else if (line.trim() === '') {
+      elements.push(<br key={i} />);
+    } else {
+      elements.push(<p key={i} className="leading-relaxed text-[15px]">{inlineFormat(line)}</p>);
+    }
+    i++;
+  }
+  return <div className="space-y-1">{elements}</div>;
+}
+
+function inlineFormat(text) {
+  const parts = [];
+  const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  let last = 0, match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    const raw = match[0];
+    if (raw.startsWith('`'))      parts.push(<code key={match.index} className="bg-gray-100 dark:bg-gray-800 text-red-600 dark:text-red-400 px-1 py-0.5 rounded text-xs font-mono">{raw.slice(1, -1)}</code>);
+    else if (raw.startsWith('**')) parts.push(<strong key={match.index}>{raw.slice(2, -2)}</strong>);
+    else                           parts.push(<em key={match.index}>{raw.slice(1, -1)}</em>);
+    last = match.index + raw.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length > 0 ? parts : text;
+}
+
+// ── TICKET BUTTON ─────────────────────────────────────────────────────
+function TicketButton({ message, userId }) {
+  const [state, setState] = useState('idle'); // idle | loading | success | error
 
   const handleRaiseTicket = async () => {
-    setTicketState('loading');
+    if (!message.interaction_id) return;
+    setState('loading');
     try {
-      const res = await fetch('http://localhost:8000/raise-ticket', {
-        method: 'POST',
+      // SECURED: authFetch injects Authorization: Bearer <userId>
+      const res = await authFetch(userId, `/api/raise-ticket/${userId}`, {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: 'test_user',
-          message: message.content,
-          conversation_context: JSON.stringify(message),
+          interaction_id: message.interaction_id,
+          user_query:     '',
+          ai_response:    message.content,
+          priority:       'medium',
         }),
       });
-      if (!res.ok) throw new Error('Failed to raise ticket');
-      const data = await res.json();
-      setTicketId(data.ticket_id || 'Generated');
-      setTicketState('success');
+      if (!res.ok) throw new Error('Failed');
+      setState('success');
     } catch {
-      setTicketState('error');
-      setTimeout(() => setTicketState('idle'), 3000);
+      setState('error');
+      setTimeout(() => setState('idle'), 3000);
     }
   };
 
-  if (ticketState === 'success') {
+  if (!message.interaction_id) return null;
+
+  if (state === 'success') {
     return (
       <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800">
         <CheckCircle className="w-3.5 h-3.5" />
-        Ticket #{ticketId} created
+        Ticket raised — support team notified
       </div>
     );
   }
@@ -46,422 +137,292 @@ function TicketButton({ message }) {
   return (
     <button
       onClick={handleRaiseTicket}
-      disabled={ticketState === 'loading'}
-      className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-gray-200 dark:border-gray-700"
+      disabled={state === 'loading'}
+      className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 border border-gray-200 dark:border-gray-700 hover:border-orange-200 dark:hover:border-orange-800 transition-all disabled:opacity-50"
     >
-      {ticketState === 'loading' ? (
-        <>
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          Creating...
-        </>
-      ) : (
-        <>
-          <FileText className="w-3.5 h-3.5" />
-          Raise Ticket
-        </>
-      )}
+      {state === 'loading'
+        ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Creating...</>
+        : <><TicketCheck className="w-3.5 h-3.5" />This didn't help — raise a ticket</>
+      }
     </button>
   );
 }
 
-// DrivePicker Component - Google Drive File Picker
-function DrivePicker({ onSelect, onClose }) {
-  const [files, setFiles] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedItem, setSelectedItem] = useState(null);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    loadFiles();
-  }, []);
-
-  const loadFiles = async () => {
-    if (!window.gapi?.client?.drive) {
-      setError('Google Drive API not initialized. Please refresh the page.');
-      console.error('Google Drive API not ready');
-      return;
-    }
-    
-    setLoading(true);
-    setError('');
-    
-    try {
-      console.log('Fetching Google Drive files...');
-      
-      // Fetch files from Google Drive (not local filesystem!)
-      const res = await window.gapi.client.drive.files.list({
-        q: 'trashed=false',
-        fields: 'files(id,name,mimeType,modifiedTime,webViewLink,iconLink)',
-        pageSize: 20,
-        orderBy: 'recency desc',
-        spaces: 'drive' // Explicitly specify Google Drive space
-      });
-      
-      console.log('Google Drive API response:', res);
-      
-      if (res.result && res.result.files) {
-        console.log(`Found ${res.result.files.length} files in Google Drive`);
-        setFiles(res.result.files);
-      } else {
-        setFiles([]);
-      }
-    } catch (err) {
-      console.error('Google Drive API error:', err);
-      setError('Failed to load Google Drive files. Please try again.');
-      setFiles([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl max-h-[600px] flex flex-col shadow-2xl border border-gray-200 dark:border-gray-700">
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/30 rounded-xl flex items-center justify-center">
-              <svg width="24" height="24" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
-                <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
-                <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
-                <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
-                <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
-                <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
-              </svg>
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Select from Google Drive
-              </h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Choose a file or folder from your Google Drive
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-          >
-            <X className="w-5 h-5 text-gray-400" />
-          </button>
-        </div>
-
-        {/* Files List */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {error && (
-            <div className="bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl text-sm mb-4 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              {error}
-            </div>
-          )}
-
-          {loading ? (
-            <div className="flex flex-col items-center justify-center h-40 gap-3">
-              <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-              <p className="text-sm text-gray-500 dark:text-gray-400">Loading your Google Drive files...</p>
-            </div>
-          ) : files.length === 0 ? (
-            <div className="text-center py-12">
-              <FileText className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-              <p className="text-gray-500 dark:text-gray-400">No files found in Google Drive</p>
-              <button
-                onClick={loadFiles}
-                className="mt-4 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                Reload files
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {files.map((file) => (
-                <button
-                  key={file.id}
-                  onClick={() => setSelectedItem(file)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${
-                    selectedItem?.id === file.id
-                      ? 'bg-blue-50 dark:bg-blue-900/30 border-2 border-blue-500 dark:border-blue-400'
-                      : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-2 border-transparent'
-                  }`}
-                >
-                  <FileText className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                  <div className="flex-1 text-left min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                      {file.name}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {new Date(file.modifiedTime).toLocaleDateString()}
-                    </p>
-                  </div>
-                  {selectedItem?.id === file.id && (
-                    <CheckCircle className="w-5 h-5 text-blue-500 flex-shrink-0" />
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            {selectedItem ? `Selected: ${selectedItem.name}` : 'Select a file or folder from Google Drive'}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => selectedItem && onSelect(selectedItem)}
-              disabled={!selectedItem}
-              className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Select
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Main Chat Component
+// ── MAIN CHAT COMPONENT ───────────────────────────────────────────────
 export default function Chat() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const userId = searchParams.get('user_id');
+  const navigate       = useNavigate();
+  const userId         = searchParams.get('user_id');
   const messagesEndRef = useRef(null);
 
-  // State
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [displayName, setDisplayName] = useState('');
-  const [userEmail, setUserEmail] = useState('');
-  const [connectedItem, setConnectedItem] = useState(null);
+  // Chat state
+  const [messages,        setMessages]        = useState([]);
+  const [input,           setInput]           = useState('');
+  const [loading,         setLoading]         = useState(false);
+  const [connectedItem,   setConnectedItem]   = useState(null);
   const [showDrivePicker, setShowDrivePicker] = useState(false);
-  const [driveApiReady, setDriveApiReady] = useState(false);
+  const [driveApiReady,   setDriveApiReady]   = useState(false);
+
+  // Ingestion
   const [ingestLoading, setIngestLoading] = useState(false);
   const [ingestSuccess, setIngestSuccess] = useState('');
-  const [ingestError, setIngestError] = useState('');
+  const [ingestError,   setIngestError]   = useState('');
 
-  // Redirect if no userId
-  useEffect(() => {
-    if (!userId) {
-      navigate('/');
-    }
-  }, [userId, navigate]);
+  // User profile
+  const [displayName,    setDisplayName]    = useState('');
+  const [userEmail,      setUserEmail]      = useState('');
+  const [profileLoading, setProfileLoading] = useState(true);
 
-  // Fetch user profile and initialize Google Drive with access token
+  // Session history (for sidebar)
+  const [sessionHistory,  setSessionHistory]  = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [activeSessionId, setActiveSessionId] = useState(null);
+
+  useEffect(() => { if (!userId) navigate('/'); }, [userId, navigate]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
+
+  // ── Fetch profile + init Google Drive ──────────────────────────────
   useEffect(() => {
     if (!userId) return;
-    
-    const fetchProfileAndInitDrive = async () => {
+
+    const init = async () => {
       try {
-        console.log('Fetching user profile and access token...');
-        
-        // Get user profile and access token from backend
-        const res = await fetch(`http://localhost:8000/api/get-token/${userId}`);
+        // /api/get-token is PUBLIC — plain fetch, no auth header needed.
+        // It returns null access_token if the user has no session → redirect to login.
+        const res  = await fetch(`${API_BASE}/api/get-token/${userId}`);
         const data = await res.json();
-        
-        console.log('Backend response:', data);
-        
-        if (data.display_name) setDisplayName(data.display_name);
-        if (data.email) setUserEmail(data.email);
-        
-        // Check if we got an access token
-        if (data.access_token) {
-          console.log('✅ Got access token from backend, initializing Google Drive...');
-          await initializeGoogleDriveWithToken(data.access_token);
+
+        const name = safeDisplayName(data.display_name);
+        if (name) {
+          setDisplayName(name);
         } else {
-          console.error('❌ No access token received from backend');
-          console.log('Make sure your backend /api/get-token endpoint returns access_token');
+          // Fallback: try analytics which also carries user_profile.
+          // SECURED: analytics is a protected endpoint — use authFetch.
+          authFetch(userId, `/api/analytics/${userId}`)
+            .then(r => r.json())
+            .then(a => { const n = safeDisplayName(a?.user_profile?.display_name); if (n) setDisplayName(n); })
+            .catch(() => {});
         }
+        if (data.email) setUserEmail(data.email);
+        setProfileLoading(false);
+
+        if (!data.access_token) return;
+
+        // Guard against duplicate GAPI script injection
+        if (window.__gapiLoaded) {
+          window.gapi.client.setToken({ access_token: data.access_token });
+          setDriveApiReady(true);
+          return;
+        }
+
+        const script   = document.createElement('script');
+        script.src     = 'https://apis.google.com/js/api.js';
+        script.onerror = () => console.error('Failed to load Google API script');
+        script.onload  = async () => {
+          try {
+            await new Promise(resolve => window.gapi.load('client', resolve));
+            await window.gapi.client.init({
+              apiKey:        GOOGLE_API_KEY,
+              discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+            });
+            window.gapi.client.setToken({ access_token: data.access_token });
+            window.__gapiLoaded = true;
+            setDriveApiReady(true);
+          } catch (err) {
+            console.error('Google API init failed:', err);
+          }
+        };
+        document.body.appendChild(script);
       } catch (err) {
         console.error('Profile/token fetch error:', err);
+        setProfileLoading(false);
       }
     };
 
-    fetchProfileAndInitDrive();
+    init();
+    fetchSessionHistory();
   }, [userId]);
 
-  // Initialize Google Drive API with access token
-  const initializeGoogleDriveWithToken = async (accessToken) => {
+  // ── Session history ────────────────────────────────────────────────
+  const fetchSessionHistory = async () => {
+    if (!userId) return;
+    setSessionsLoading(true);
     try {
-      console.log('Step 1: Checking if gapi is loaded...');
-      
-      // Wait for gapi to be loaded
-      if (!window.gapi) {
-        console.log('⏳ Waiting for gapi to load...');
-        setTimeout(() => initializeGoogleDriveWithToken(accessToken), 500);
-        return;
-      }
-
-      console.log('Step 2: Loading gapi client...');
-      
-      // Load the client library
-      await new Promise((resolve) => {
-        window.gapi.load('client', resolve);
-      });
-
-      console.log('Step 3: Initializing gapi client...');
-      
-      // Initialize the client
-      await window.gapi.client.init({
-        discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-      });
-
-      console.log('Step 4: Setting access token...');
-      
-      // Set the access token - THIS IS CRITICAL!
-      window.gapi.client.setToken({
-        access_token: accessToken
-      });
-
-      console.log('✅ Google Drive API initialized successfully!');
-      console.log('✅ You can now browse Google Drive files');
-      
-      setDriveApiReady(true);
-    } catch (error) {
-      console.error('❌ Error initializing Google Drive API:', error);
-      
-      // Retry logic
-      console.log('Retrying in 2 seconds...');
-      setTimeout(() => initializeGoogleDriveWithToken(accessToken), 2000);
+      // SECURED: requires Authorization: Bearer <userId>
+      const res  = await authFetch(userId, `/api/sessions/${userId}`);
+      const data = await res.json();
+      setSessionHistory(data);
+    } catch (err) {
+      console.error('Sessions fetch error:', err);
+    } finally {
+      setSessionsLoading(false);
     }
   };
 
-  // Auto-scroll to bottom
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+  const handleLoadSession = async (session) => {
+    try {
+      // SECURED: requires Authorization: Bearer <userId>
+      const res  = await authFetch(userId, `/api/sessions/${userId}/${session.id}/messages`);
+      const data = await res.json();
+      setMessages(data.messages);
+      setActiveSessionId(session.id);
+      setConnectedItem({ id: data.folder_id, name: data.folder_name || data.folder_id });
+    } catch (err) {
+      console.error('Load session error:', err);
+    }
+  };
 
-  // Handle new chat
   const handleNewChat = () => {
     setMessages([]);
     setConnectedItem(null);
+    setActiveSessionId(null);
     setIngestSuccess('');
     setIngestError('');
     setInput('');
   };
 
-  // Handle opening Drive Picker - NO NATIVE FILE PICKER!
+  // ── Drive picker ───────────────────────────────────────────────────
   const handleOpenDrivePicker = (e) => {
-    // Prevent any default behavior
     e.preventDefault();
     e.stopPropagation();
-    
     if (!driveApiReady) {
-      alert('Google Drive is still loading. Please wait a moment and try again.');
+      alert('Google Drive is still loading. Please wait a moment.');
       return;
     }
-    
-    console.log('Opening Google Drive picker...');
     setShowDrivePicker(true);
   };
 
-  // Handle file/folder selection
+  // ── Drive item selected → ingest ───────────────────────────────────
   const handleDriveSelect = async (item) => {
-    console.log('Selected from Google Drive:', item);
     setShowDrivePicker(false);
     setConnectedItem(item);
+    setIngestLoading(true);
+    setIngestError('');
+    setIngestSuccess(`Connecting to "${item.name}"...`);
 
-    // If folder, trigger ingestion
-    if (item.mimeType === 'application/vnd.google-apps.folder') {
-      setIngestLoading(true);
-      setIngestError('');
-      setIngestSuccess('');
+    try {
+      // SECURED: requires Authorization: Bearer <userId>
+      const res  = await authFetch(userId, `/api/ingest-item/${userId}/${item.id}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Ingestion failed');
 
-      try {
-        const res = await fetch(
-          `http://localhost:8000/ingest-folder/${userId}/${item.id}`,
-          { method: 'POST' }
-        );
-
-        if (!res.ok) throw new Error('Ingestion failed');
-
-        const data = await res.json();
-        setIngestSuccess(
-          `✓ Processed ${data.files_processed} files with ${data.total_chunks_saved} chunks`
-        );
-        setTimeout(() => setIngestSuccess(''), 5000);
-      } catch (err) {
-        setIngestError('⚠ Failed to process folder. Please try again.');
-        setTimeout(() => setIngestError(''), 5000);
-      } finally {
-        setIngestLoading(false);
-      }
+      const realName = data.item_name || item.name;
+      setConnectedItem({ id: item.id, name: realName });
+      setIngestSuccess(`✓ Connected "${realName}" — ${data.files_processed} file(s), ${data.total_chunks_saved} chunks`);
+      setTimeout(() => setIngestSuccess(''), 5000);
+    } catch (err) {
+      setIngestError(err.message || 'Failed to process. Please try again.');
+      setTimeout(() => setIngestError(''), 5000);
+    } finally {
+      setIngestLoading(false);
     }
   };
 
-  // Handle message submission
+  // ── Chat submit — streaming ────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
+    if (!connectedItem) {
+      alert('Please connect a Drive file or folder first.');
+      return;
+    }
 
-    const userMessage = { role: 'user', content: input.trim() };
-    setMessages((prev) => [...prev, userMessage]);
+    const userMessage = { role: 'user', content: input.trim(), sources: [], interaction_id: null };
+    setMessages(prev => [...prev, userMessage]);
+    setMessages(prev => [...prev, { role: 'bot', content: '', sources: [], interaction_id: null, streaming: true }]);
     setInput('');
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:8000/query', {
-        method: 'POST',
+      // SECURED: requires Authorization: Bearer <userId>
+      const res = await authFetch(userId, `/api/chat/${userId}/${connectedItem.id}`, {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          query: userMessage.content,
-          folder_id: connectedItem?.id || 'default',
-        }),
+        body:    JSON.stringify({ question: userMessage.content, folder_name: connectedItem.name }),
       });
 
-      if (!res.ok) throw new Error('Query failed');
+      if (!res.ok) throw new Error('Server error');
 
-      const data = await res.json();
-      const botMessage = {
-        role: 'bot',
-        content: data.response || 'Sorry, I could not process that.',
-        sources: data.sources || [],
-      };
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let   buffer  = '';
 
-      setMessages((prev) => [...prev, botMessage]);
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'bot',
-          content: 'An error occurred. Please try again.',
-          sources: [],
-        },
-      ]);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const frame = JSON.parse(line);
+            if (frame.type === 'token') {
+              setMessages(prev => {
+                const updated = [...prev];
+                const last    = { ...updated[updated.length - 1] };
+                last.content += frame.content;
+                updated[updated.length - 1] = last;
+                return updated;
+              });
+            } else if (frame.type === 'done') {
+              setMessages(prev => {
+                const updated = [...prev];
+                const last    = { ...updated[updated.length - 1] };
+                last.sources        = frame.sources || [];
+                last.interaction_id = frame.interaction_id;
+                last.streaming      = false;
+                updated[updated.length - 1] = last;
+                return updated;
+              });
+              fetchSessionHistory();
+            }
+          } catch { /* non-JSON line */ }
+        }
+      }
+    } catch {
+      setMessages(prev => {
+        const updated = [...prev];
+        const last    = { ...updated[updated.length - 1] };
+        last.content   = 'An error occurred. Please try again.';
+        last.streaming = false;
+        updated[updated.length - 1] = last;
+        return updated;
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const getIngestStatusStyle = () => {
-    if (ingestLoading)
-      return 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800';
-    if (ingestError)
-      return 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800';
-    if (ingestSuccess)
-      return 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800';
+    if (ingestLoading) return 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800';
+    if (ingestError)   return 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800';
+    if (ingestSuccess) return 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800';
     return '';
   };
+
+  const safeName = safeDisplayName(displayName);
 
   return (
     <AppLayout
       userId={userId}
       displayName={displayName}
       userEmail={userEmail}
+      profileLoading={profileLoading}
       onNewChat={handleNewChat}
+      sessionHistory={sessionHistory}
+      sessionsLoading={sessionsLoading}
+      activeSessionId={activeSessionId}
+      onLoadSession={handleLoadSession}
     >
       <div className="flex flex-col h-full">
+
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto px-4 py-8">
+
             {/* Empty State */}
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -469,7 +430,12 @@ export default function Chat() {
                   <Sparkles className="w-10 h-10 text-white" />
                 </div>
                 <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">
-                  How can I help you today?
+                  {profileLoading
+                    ? 'How can I help you today?'
+                    : safeName
+                      ? `Hi ${safeName.split(' ')[0]}, how can I help?`
+                      : 'How can I help you today?'
+                  }
                 </h2>
                 <p className="text-gray-500 dark:text-gray-400 mb-8 max-w-md">
                   {driveApiReady
@@ -477,25 +443,23 @@ export default function Chat() {
                     : 'Initializing Google Drive connection...'}
                 </p>
 
-                {/* Suggestions */}
+                {/* Suggestion chips */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
                   {[
-                    { icon: Clock, text: 'Summarize recent documents', color: 'blue' },
-                    { icon: FileText, text: 'Find specific information', color: 'green' },
-                    { icon: Zap, text: 'Compare multiple files', color: 'purple' },
-                    { icon: Sparkles, text: 'Extract key insights', color: 'orange' },
-                  ].map((suggestion, idx) => (
+                    { icon: Clock,    text: 'Summarize recent documents' },
+                    { icon: FileText, text: 'Find specific information'  },
+                    { icon: Zap,      text: 'Compare multiple files'     },
+                    { icon: Sparkles, text: 'Extract key insights'       },
+                  ].map((s, idx) => (
                     <button
                       key={idx}
                       className="flex items-center gap-3 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:border-gray-300 dark:hover:border-gray-600 transition-all group text-left"
-                      onClick={() => setInput(suggestion.text)}
+                      onClick={() => setInput(s.text)}
                     >
                       <div className="w-10 h-10 bg-gray-50 dark:bg-gray-700 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <suggestion.icon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                        <s.icon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
                       </div>
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        {suggestion.text}
-                      </span>
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{s.text}</span>
                     </button>
                   ))}
                 </div>
@@ -503,119 +467,96 @@ export default function Chat() {
             )}
 
             {/* Messages */}
-            <div className="space-y-6">
-              {messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={`flex gap-4 ${
-                    message.role === 'user' ? 'justify-end' : 'justify-start'
-                  }`}
-                >
-                  {/* Bot Avatar */}
-                  {message.role === 'bot' && (
-                    <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-gray-900 to-gray-700 dark:from-gray-700 dark:to-gray-500 flex items-center justify-center flex-shrink-0 shadow-sm">
-                      <Bot className="w-5 h-5 text-white" />
+            {messages.map((message, index) => (
+              <div
+                key={index}
+                className={`flex gap-4 mb-8 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                {/* Bot Avatar */}
+                {message.role === 'bot' && (
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-gray-900 to-gray-700 dark:from-gray-700 dark:to-gray-500 flex items-center justify-center flex-shrink-0 shadow-sm mt-1">
+                    <Bot className="w-5 h-5 text-white" />
+                  </div>
+                )}
+
+                {/* Message Content */}
+                <div className={`max-w-[75%] ${
+                  message.role === 'user'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 py-3 rounded-2xl rounded-tr-sm shadow-md'
+                    : 'text-gray-900 dark:text-gray-100'
+                }`}>
+                  {message.role === 'bot'
+                    ? <SimpleMarkdown text={message.content} />
+                    : <p className="whitespace-pre-wrap leading-relaxed text-[15px]">{message.content}</p>
+                  }
+
+                  {/* Streaming cursor */}
+                  {message.streaming && (
+                    <span className="inline-block w-0.5 h-4 bg-gray-400 animate-pulse ml-0.5 align-middle" />
+                  )}
+
+                  {/* Sources */}
+                  {message.sources?.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+                      <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider font-semibold mb-2">Sources</p>
+                      <div className="flex flex-wrap gap-2">
+                        {message.sources.map((source, idx) => {
+                          const name = typeof source === 'object' ? source.name : source;
+                          const link = typeof source === 'object' ? source.link : null;
+                          return link ? (
+                            <a key={idx} href={link} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors">
+                              <FileText className="w-3 h-3" />{name}<ExternalLink className="w-3 h-3" />
+                            </a>
+                          ) : (
+                            <span key={idx} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
+                              <FileText className="w-3 h-3" />{name}
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <TicketButton message={message} userId={userId} />
                     </div>
                   )}
 
-                  {/* Message Content */}
-                  <div
-                    className={`max-w-[75%] ${
-                      message.role === 'user'
-                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 py-3 rounded-2xl rounded-tr-sm shadow-md'
-                        : 'text-gray-900 dark:text-gray-100'
-                    }`}
-                  >
-                    <p className="whitespace-pre-wrap leading-relaxed text-[15px]">
-                      {message.content}
-                    </p>
-
-                    {/* Sources */}
-                    {message.sources?.length > 0 && (
-                      <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
-                        <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider font-semibold mb-2">
-                          Sources
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {message.sources.map((source, idx) => {
-                            const name =
-                              typeof source === 'object' ? source.name : source;
-                            const link =
-                              typeof source === 'object' ? source.link : null;
-                            return link ? (
-                              <a
-                                key={idx}
-                                href={link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
-                              >
-                                <FileText className="w-3 h-3" />
-                                {name}
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
-                            ) : (
-                              <span
-                                key={idx}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700"
-                              >
-                                <FileText className="w-3 h-3" />
-                                {name}
-                              </span>
-                            );
-                          })}
-                        </div>
-                        <TicketButton message={message} />
-                      </div>
-                    )}
-
-                    {/* Ticket Button (no sources) */}
-                    {message.role === 'bot' && !message.sources?.length && (
-                      <TicketButton message={message} />
-                    )}
-                  </div>
+                  {message.role === 'bot' && !message.sources?.length && !message.streaming && (
+                    <TicketButton message={message} userId={userId} />
+                  )}
                 </div>
-              ))}
+              </div>
+            ))}
 
-              {/* Loading */}
-              {loading && (
-                <div className="flex gap-4 justify-start">
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-gray-900 to-gray-700 dark:from-gray-700 dark:to-gray-500 flex items-center justify-center shadow-sm">
-                    <Bot className="w-5 h-5 text-white" />
-                  </div>
-                  <div className="flex items-center gap-2 px-4 py-3 bg-gray-100 dark:bg-gray-800 rounded-2xl">
-                    <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
-                    <span className="text-sm text-gray-500 dark:text-gray-400">
-                      Thinking...
-                    </span>
-                  </div>
+            {/* Typing indicator */}
+            {loading && messages[messages.length - 1]?.role !== 'bot' && (
+              <div className="flex gap-4 justify-start">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-gray-900 to-gray-700 dark:from-gray-700 dark:to-gray-500 flex items-center justify-center flex-shrink-0 shadow-sm">
+                  <Bot className="w-5 h-5 text-white" />
                 </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
+                <div className="flex items-center gap-2 px-4 py-3 bg-gray-100 dark:bg-gray-800 rounded-2xl">
+                  <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Thinking...</span>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
           </div>
         </div>
 
         {/* Input Area */}
         <div className="bg-transparent p-4 pb-5">
           <div className="max-w-3xl mx-auto">
-            {/* Ingestion Status */}
+
+            {/* Ingestion status */}
             {(ingestLoading || ingestSuccess || ingestError) && (
-              <div
-                className={`mb-3 px-4 py-2.5 rounded-full text-sm font-medium flex items-center justify-center ${getIngestStatusStyle()}`}
-              >
+              <div className={`mb-3 px-4 py-2.5 rounded-full text-sm font-medium flex items-center justify-center ${getIngestStatusStyle()}`}>
                 {ingestLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                {!ingestLoading && ingestError && (
-                  <AlertCircle className="w-4 h-4 mr-2" />
-                )}
-                {!ingestLoading && ingestSuccess && (
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                )}
+                {!ingestLoading && ingestError  && <AlertCircle className="w-4 h-4 mr-2" />}
+                {!ingestLoading && ingestSuccess && <CheckCircle className="w-4 h-4 mr-2" />}
                 {ingestError || ingestSuccess || 'Processing document...'}
               </div>
             )}
 
-            {/* Connected File Banner */}
+            {/* Connected file banner */}
             {connectedItem && (
               <div className="mb-3 flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-full">
                 <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
@@ -631,12 +572,11 @@ export default function Chat() {
               </div>
             )}
 
-            {/* Input Form — pill shaped like ChatGPT */}
+            {/* Input form */}
             <form
               onSubmit={handleSubmit}
-              className="flex items-center gap-1 bg-transparent border border-gray-300 dark:border-gray-600 rounded-full px-4 py-2.5 focus-within:border-gray-400 dark:focus-within:border-gray-500 transition-colors shadow-sm"
+              className="flex items-center gap-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-full px-4 py-2.5 focus-within:border-gray-400 dark:focus-within:border-gray-500 transition-colors shadow-sm"
             >
-              {/* Paperclip / Drive button */}
               <button
                 type="button"
                 onClick={handleOpenDrivePicker}
@@ -652,31 +592,14 @@ export default function Chat() {
 
               <textarea
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSubmit(e);
-                  }
-                }}
-                placeholder={
-                  connectedItem
-                    ? `Ask about "${connectedItem.name}"...`
-                    : 'Ask anything...'
-                }
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
+                placeholder={connectedItem ? `Ask about "${connectedItem.name}"...` : 'Attach a Drive file to start...'}
                 className="flex-1 bg-transparent resize-none outline-none text-[15px] text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 py-1 px-2 max-h-32 leading-relaxed"
                 rows="1"
-                style={{
-                  height: 'auto',
-                  minHeight: '24px',
-                }}
-                onInput={(e) => {
-                  e.target.style.height = 'auto';
-                  e.target.style.height = e.target.scrollHeight + 'px';
-                }}
+                onInput={e => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
               />
 
-              {/* Send button — solid circle like ChatGPT */}
               <button
                 type="submit"
                 disabled={!input.trim() || loading}
@@ -693,12 +616,8 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* Drive Picker Modal - This is Google Drive, not native file picker! */}
       {showDrivePicker && (
-        <DrivePicker
-          onSelect={handleDriveSelect}
-          onClose={() => setShowDrivePicker(false)}
-        />
+        <DrivePicker userId={userId} onSelect={handleDriveSelect} onClose={() => setShowDrivePicker(false)} />
       )}
     </AppLayout>
   );

@@ -1,17 +1,31 @@
 import React from 'react';
-import { ArrowRight, Sparkles, MessageSquare, Files, Zap, Brain, CheckCircle2, Search, Clock, Shield, FileText, Folder, Moon, Sun } from 'lucide-react';
+import { ArrowRight, Sparkles, MessageSquare, Files, Zap, CheckCircle2, Search, Clock, Shield, FileText, Folder, Moon, Sun } from 'lucide-react';
+// FIX #3: Removed unused 'Brain' import — was imported but never used in JSX
 import ScrollReveal from '../components/ScrollReveal';
 import { useTheme } from '../context/ThemeContext';
+
+// FIX #1 & #2: Dynamic UUID user_id + API base from env variable
+// crypto.randomUUID() is built into all modern browsers — no library needed.
+// sessionStorage ensures the same tab reuses the same ID if the user
+// refreshes before completing OAuth (avoids creating orphaned sessions).
+function getOrCreateUserId() {
+  const stored = sessionStorage.getItem('lumina_user_id');
+  if (stored) return stored;
+  const id = crypto.randomUUID();
+  sessionStorage.setItem('lumina_user_id', id);
+  return id;
+}
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 export default function Login() {
   const { isDark, toggleTheme } = useTheme();
   
   const handleGoogleLogin = () => {
-
-
-    // Corrected URL: Added /api/ before login
-    window.location.href = 'http://localhost:8000/api/login?user_id=test_user_1';
-
+    // FIX #1: Dynamic UUID instead of hardcoded 'test_user_1'
+    // FIX #2: API_BASE from env instead of hardcoded 'http://localhost:8000'
+    const userId = getOrCreateUserId();
+    window.location.href = `${API_BASE}/api/login?user_id=${userId}`;
   };
 
   return (
@@ -71,12 +85,13 @@ export default function Login() {
           </svg>
         </div>
         
-        {/* Additional Floating Sheets/Docs Icons */}
+        {/* Additional Floating Icons */}
         <div className="absolute top-[45%] left-[5%] opacity-[0.04] dark:opacity-[0.02]">
           <FileText className="w-28 h-28 text-yellow-600 dark:text-yellow-500 transform -rotate-6" />
         </div>
+        {/* FIX #4: 'rotate-15' is not a valid Tailwind class — changed to 'rotate-12' */}
         <div className="absolute bottom-[25%] right-[15%] opacity-[0.04] dark:opacity-[0.02]">
-          <Folder className="w-32 h-32 text-red-600 dark:text-red-500 transform rotate-15" />
+          <Folder className="w-32 h-32 text-red-600 dark:text-red-500 transform rotate-12" />
         </div>
       </div>
       
@@ -273,21 +288,21 @@ export default function Login() {
                 <div className="w-12 h-12 bg-green-100 dark:bg-green-950 rounded-xl flex items-center justify-center mb-5">
                   <Zap className="w-6 h-6 text-green-600 dark:text-green-400" />
                 </div>
-                <h3 className="text-xl font-bold mb-3">Instant Summaries</h3>
+                <h3 className="text-xl font-bold mb-3">Instant Answers</h3>
                 <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
-                  Get the key points from 50-page reports in seconds. Extract insights without reading entire documents.
+                  Get responses in seconds, not minutes. No waiting, no loading bars—just immediate, accurate answers.
                 </p>
               </div>
             </ScrollReveal>
 
             <ScrollReveal delay={400}>
-              <div className="bg-white dark:bg-gray-900 p-8 rounded-2xl border border-gray-200 dark:border-gray-800 hover:shadow-lg dark:hover:shadow-orange-900/20 transition-shadow">
-                <div className="w-12 h-12 bg-orange-100 dark:bg-orange-950 rounded-xl flex items-center justify-center mb-5">
-                  <Brain className="w-6 h-6 text-orange-600 dark:text-orange-400" />
+              <div className="bg-white dark:bg-gray-900 p-8 rounded-2xl border border-gray-200 dark:border-gray-800 hover:shadow-lg dark:hover:shadow-indigo-900/20 transition-shadow">
+                <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-950 rounded-xl flex items-center justify-center mb-5">
+                  <Shield className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
                 </div>
-                <h3 className="text-xl font-bold mb-3">Context-Aware AI</h3>
+                <h3 className="text-xl font-bold mb-3">Secure by Default</h3>
                 <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
-                  Understands your documents deeply. Gets nuance, follows references, and provides accurate, sourced answers.
+                  OAuth 2.0 authentication means your data stays in your Drive. We never store your documents.
                 </p>
               </div>
             </ScrollReveal>
@@ -298,117 +313,110 @@ export default function Login() {
 
       {/* How It Works Section */}
       <section className="py-32 px-6 relative overflow-hidden">
-        {/* Decorative Background Elements */}
-        <div className="absolute inset-0 bg-gradient-to-br from-transparent via-blue-50/30 to-transparent dark:via-blue-950/20 pointer-events-none"></div>
-        
-        <div className="max-w-6xl mx-auto relative">
-          
+        <div className="max-w-5xl mx-auto relative">
+
           <ScrollReveal>
-            <div className="text-center mb-20">
+            <div className="text-center mb-16">
               <h2 className="text-4xl md:text-5xl font-bold mb-4">
-                From connection to answers<br />in under 60 seconds
+                Up and running in 3 steps
               </h2>
-              <p className="text-lg text-gray-600 dark:text-gray-400 mt-4">
-                No training required. No complex setup. Just three clicks to unlock your entire Drive.
+              <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto mt-4">
+                No setup, no configuration, no IT department needed.
               </p>
             </div>
           </ScrollReveal>
 
-          <div className="relative">
-            
-            {/* Vertical Timeline for Desktop */}
-            <div className="hidden md:block absolute left-1/2 top-0 bottom-0 w-0.5 bg-gradient-to-b from-blue-600 via-purple-600 to-green-600 dark:from-blue-500 dark:via-purple-500 dark:to-green-500 transform -translate-x-1/2"></div>
-            
-            <div className="space-y-20">
-              
-              {/* Step 1 - Left Side */}
-              <ScrollReveal delay={100}>
-                <div className="grid md:grid-cols-2 gap-8 items-center">
-                  <div className="md:text-right md:pr-16">
-                    <div className="inline-block md:hidden w-14 h-14 bg-gradient-to-br from-blue-600 to-blue-500 text-white rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg mb-4">
-                      1
-                    </div>
-                    <h3 className="text-2xl md:text-3xl font-bold mb-4">Secure one-click connection</h3>
-                    <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed">
-                      Authorize with Google OAuth in seconds. We only request read-only access—your files stay private and secure.
-                    </p>
-                  </div>
-                  
-                  {/* Center Circle - Desktop Only */}
-                  <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 w-14 h-14 bg-gradient-to-br from-blue-600 to-blue-500 text-white rounded-2xl items-center justify-center text-xl font-bold shadow-xl z-10">
+          <div className="space-y-16 relative">
+            {/* Vertical connector line — desktop only */}
+            <div className="hidden md:block absolute left-1/2 top-8 bottom-8 w-0.5 bg-gradient-to-b from-blue-200 via-purple-200 to-green-200 dark:from-blue-900 dark:via-purple-900 dark:to-green-900 -translate-x-1/2"></div>
+
+            {/* Step 1 */}
+            <ScrollReveal delay={100}>
+              <div className="grid md:grid-cols-2 gap-8 items-center">
+                <div className="md:text-right md:pr-16">
+                  <div className="inline-block md:hidden w-14 h-14 bg-gradient-to-br from-blue-600 to-blue-500 text-white rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg mb-4">
                     1
                   </div>
-                  
-                  <div className="md:pl-16">
-                    <div className="bg-blue-50 dark:bg-blue-950/30 p-6 rounded-2xl border-2 border-blue-200 dark:border-blue-900">
-                      <div className="flex items-center gap-3 text-blue-600 dark:text-blue-400">
-                        <Shield className="w-8 h-8" />
-                        <span className="font-semibold">Enterprise-grade security</span>
-                      </div>
+                  <h3 className="text-2xl md:text-3xl font-bold mb-4">Connect your Google Drive</h3>
+                  <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed">
+                    Sign in with Google and grant read-only access. Your credentials are secured with OAuth 2.0.
+                  </p>
+                </div>
+
+                {/* Center Circle — desktop only */}
+                <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 w-14 h-14 bg-gradient-to-br from-blue-600 to-blue-500 text-white rounded-2xl items-center justify-center text-xl font-bold shadow-xl z-10">
+                  1
+                </div>
+
+                <div className="md:pl-16">
+                  <div className="bg-blue-50 dark:bg-blue-950/30 p-6 rounded-2xl border-2 border-blue-200 dark:border-blue-900">
+                    <div className="flex items-center gap-3 text-blue-600 dark:text-blue-400">
+                      <Shield className="w-8 h-8" />
+                      <span className="font-semibold">Enterprise-grade security</span>
                     </div>
                   </div>
                 </div>
-              </ScrollReveal>
+              </div>
+            </ScrollReveal>
 
-              {/* Step 2 - Right Side */}
-              <ScrollReveal delay={200}>
-                <div className="grid md:grid-cols-2 gap-8 items-center">
-                  <div className="md:pr-16 order-2 md:order-1">
-                    <div className="bg-purple-50 dark:bg-purple-950/30 p-6 rounded-2xl border-2 border-purple-200 dark:border-purple-900">
-                      <div className="flex items-center gap-3 text-purple-600 dark:text-purple-400">
-                        <MessageSquare className="w-8 h-8" />
-                        <span className="font-semibold">Conversational interface</span>
-                      </div>
+            {/* Step 2 */}
+            <ScrollReveal delay={200}>
+              <div className="grid md:grid-cols-2 gap-8 items-center">
+                <div className="md:pr-16 order-2 md:order-1">
+                  <div className="bg-purple-50 dark:bg-purple-950/30 p-6 rounded-2xl border-2 border-purple-200 dark:border-purple-900">
+                    <div className="flex items-center gap-3 text-purple-600 dark:text-purple-400">
+                      <MessageSquare className="w-8 h-8" />
+                      <span className="font-semibold">Conversational interface</span>
                     </div>
                   </div>
-                  
-                  {/* Center Circle - Desktop Only */}
-                  <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 w-14 h-14 bg-gradient-to-br from-purple-600 to-purple-500 text-white rounded-2xl items-center justify-center text-xl font-bold shadow-xl z-10">
+                </div>
+
+                {/* Center Circle — desktop only */}
+                <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 w-14 h-14 bg-gradient-to-br from-purple-600 to-purple-500 text-white rounded-2xl items-center justify-center text-xl font-bold shadow-xl z-10">
+                  2
+                </div>
+
+                <div className="md:pl-16 order-1 md:order-2">
+                  <div className="inline-block md:hidden w-14 h-14 bg-gradient-to-br from-purple-600 to-purple-500 text-white rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg mb-4">
                     2
                   </div>
-                  
-                  <div className="md:pl-16 order-1 md:order-2">
-                    <div className="inline-block md:hidden w-14 h-14 bg-gradient-to-br from-purple-600 to-purple-500 text-white rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg mb-4">
-                      2
-                    </div>
-                    <h3 className="text-2xl md:text-3xl font-bold mb-4">Ask anything in plain English</h3>
-                    <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed">
-                      No special syntax or commands. Just type your question naturally—our AI understands context and intent.
-                    </p>
-                  </div>
+                  <h3 className="text-2xl md:text-3xl font-bold mb-4">Ask anything in plain English</h3>
+                  <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed">
+                    No special syntax or commands. Just type your question naturally—our AI understands context and intent.
+                  </p>
                 </div>
-              </ScrollReveal>
+              </div>
+            </ScrollReveal>
 
-              {/* Step 3 - Left Side */}
-              <ScrollReveal delay={300}>
-                <div className="grid md:grid-cols-2 gap-8 items-center">
-                  <div className="md:text-right md:pr-16">
-                    <div className="inline-block md:hidden w-14 h-14 bg-gradient-to-br from-green-600 to-green-500 text-white rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg mb-4">
-                      3
-                    </div>
-                    <h3 className="text-2xl md:text-3xl font-bold mb-4">Get sourced answers instantly</h3>
-                    <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed">
-                      Receive accurate answers with direct citations to source documents. Know exactly where the information came from.
-                    </p>
-                  </div>
-                  
-                  {/* Center Circle - Desktop Only */}
-                  <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 w-14 h-14 bg-gradient-to-br from-green-600 to-green-500 text-white rounded-2xl items-center justify-center text-xl font-bold shadow-xl z-10">
+            {/* Step 3 */}
+            <ScrollReveal delay={300}>
+              <div className="grid md:grid-cols-2 gap-8 items-center">
+                <div className="md:text-right md:pr-16">
+                  <div className="inline-block md:hidden w-14 h-14 bg-gradient-to-br from-green-600 to-green-500 text-white rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg mb-4">
                     3
                   </div>
-                  
-                  <div className="md:pl-16">
-                    <div className="bg-green-50 dark:bg-green-950/30 p-6 rounded-2xl border-2 border-green-200 dark:border-green-900">
-                      <div className="flex items-center gap-3 text-green-600 dark:text-green-400">
-                        <Zap className="w-8 h-8" />
-                        <span className="font-semibold">Sub-second response time</span>
-                      </div>
+                  <h3 className="text-2xl md:text-3xl font-bold mb-4">Get sourced answers instantly</h3>
+                  <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed">
+                    Receive accurate answers with direct citations to source documents. Know exactly where the information came from.
+                  </p>
+                </div>
+
+                {/* Center Circle — desktop only */}
+                <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 w-14 h-14 bg-gradient-to-br from-green-600 to-green-500 text-white rounded-2xl items-center justify-center text-xl font-bold shadow-xl z-10">
+                  3
+                </div>
+
+                <div className="md:pl-16">
+                  <div className="bg-green-50 dark:bg-green-950/30 p-6 rounded-2xl border-2 border-green-200 dark:border-green-900">
+                    <div className="flex items-center gap-3 text-green-600 dark:text-green-400">
+                      <Zap className="w-8 h-8" />
+                      <span className="font-semibold">Sub-second response time</span>
                     </div>
                   </div>
                 </div>
-              </ScrollReveal>
+              </div>
+            </ScrollReveal>
 
-            </div>
           </div>
         </div>
       </section>
@@ -600,7 +608,7 @@ export default function Login() {
             </div>
             
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              © 2024 Lumina AI. Making knowledge work effortless.
+              © 2025 Lumina AI. Making knowledge work effortless.
             </p>
           </div>
         </div>
