@@ -29,7 +29,7 @@ BASE_DIR = CURRENT_DIR.parent
 CLIENT_SECRETS_FILE = str(BASE_DIR / "client_secret.json")
 CHROMA_PERSIST_DIR = str(BASE_DIR / "chroma_db")
 
-SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/userinfo.profile', 'https://www.googleapis.com/auth/userinfo.email']
 REDIRECT_URI = "http://localhost:8000/api/auth/callback"
 
 # In-memory session storage (OAuth flow)
@@ -37,7 +37,7 @@ REDIRECT_URI = "http://localhost:8000/api/auth/callback"
 user_sessions = {}
 oauth_flows = {}
 
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyB1h9f9wZxDqRKaYv4awJRb3xkZlUg9Jq8")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyC0OzyJH_I-uI8eWmPs0NYZ1XdhQbMsjb4")
 
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=GOOGLE_API_KEY, temperature=0.3)
@@ -76,6 +76,25 @@ def auth_callback(request, state: str, code: str):
 
     flow.fetch_token(code=code)
     credentials = flow.credentials
+
+    # Fetch real Google profile name + email
+    display_name = state  # fallback to user_id
+    email = ''
+    try:
+        people_service = build('people', 'v1', credentials=credentials)
+        profile = people_service.people().get(
+            resourceName='people/me',
+            personFields='names,emailAddresses'
+        ).execute()
+        names = profile.get('names', [])
+        emails = profile.get('emailAddresses', [])
+        if names:
+            display_name = names[0].get('displayName', state)
+        if emails:
+            email = emails[0].get('value', '')
+    except Exception:
+        pass  # fallback to user_id if People API fails
+
     user_sessions[state] = {
         'token': credentials.token,
         'refresh_token': credentials.refresh_token,
@@ -83,6 +102,8 @@ def auth_callback(request, state: str, code: str):
         'client_id': credentials.client_id,
         'client_secret': credentials.client_secret,
         'scopes': credentials.scopes,
+        'display_name': display_name,
+        'email': email,
     }
     del oauth_flows[state]
     return HttpResponseRedirect(f"http://localhost:5173/chat?user_id={state}")
@@ -90,10 +111,15 @@ def auth_callback(request, state: str, code: str):
 
 @api.get("/get-token/{user_id}")
 def get_access_token(request, user_id: str):
-    """Returns OAuth access token to the React frontend for the Google Picker (FR-002)."""
+    """Returns OAuth access token + profile info to the React frontend (FR-002)."""
     if user_id not in user_sessions:
         return api.create_response(request, {"detail": "Not authenticated"}, status=401)
-    return {"access_token": user_sessions[user_id]['token']}
+    session = user_sessions[user_id]
+    return {
+        "access_token": session['token'],
+        "display_name": session.get('display_name', user_id),
+        "email": session.get('email', ''),
+    }
 
 
 # ------------------------------------------------------------------
