@@ -55,7 +55,7 @@ rag-ui/
 
 ### Page 1: Login (`/`)
 - Centered card with logo and "Sign in with Google" button
-- Redirects to: `http://localhost:8000/login?user_id=test_user_1`
+- Redirects to: `http://localhost:8000/api/list-drive-items/?user_id=test_user_1`
 - Backend handles OAuth and redirects to `/dashboard?user_id=test_user_1`
 
 ### Page 2: Dashboard (`/dashboard`)
