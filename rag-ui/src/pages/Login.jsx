@@ -3,8 +3,8 @@ import { ArrowRight, Database, Shield, Zap, Sparkles } from 'lucide-react';
 
 export default function Login() {
   const handleGoogleLogin = () => {
-    // Redirect to backend OAuth endpoint
-    window.location.href = 'http://localhost:8000/login?user_id=test_user_1';
+    // Corrected URL: Added /api/ before login
+    window.location.href = 'http://localhost:8000/api/login?user_id=test_user_1';
   };
 
   return (

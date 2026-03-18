@@ -62,7 +62,7 @@ export default function Chat() {
       setIngestError('');
       
       try {
-        const response = await fetch(`http://localhost:8000/list-drive-items/${userId}`);
+        const response = await fetch(`http://localhost:8000/api/list-drive-items/${userId}`);
         
         if (!response.body) return;
 
@@ -116,7 +116,7 @@ export default function Chat() {
     setIngestSuccess(`Connecting to "${selectedItem.name}"...`);
 
     try {
-      const response = await fetch(`http://localhost:8000/ingest-item/${userId}/${selectedItem.id}`, { 
+      const response = await fetch(`http://localhost:8000/api/ingest-item/${userId}/${selectedItem.id}`, { 
         method: 'POST' 
       });
       const data = await response.json();
@@ -158,7 +158,7 @@ export default function Chat() {
     setLoading(true);
 
     try {
-      const response = await fetch(`http://localhost:8000/chat/${userId}/${connectedItem.id}`, {
+      const response = await fetch(`http://localhost:8000/api/chat/${userId}/${connectedItem.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: userMessage.content }),
