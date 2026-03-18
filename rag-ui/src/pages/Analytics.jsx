@@ -90,16 +90,7 @@ export default function Analytics() {
   const [displayName,  setDisplayName]  = useState('');
 
   useEffect(() => { if (!userId) navigate('/'); }, [userId, navigate]);
-  useEffect(() => { fetchAnalytics(); fetchProfile(); }, [userId]);
-
-  const fetchProfile = async () => {
-    if (!userId) return;
-    try {
-      const res = await fetch(`http://localhost:8000/api/get-token/${userId}`);
-      const data = await res.json();
-      if (data.display_name) setDisplayName(data.display_name);
-    } catch { /* silent */ }
-  };
+  useEffect(() => { fetchAnalytics(); }, [userId]);
 
   const fetchAnalytics = async () => {
     if (!userId) return;
@@ -111,6 +102,7 @@ export default function Analytics() {
       setData(json);
       setLastRefresh(new Date());
       setError('');
+      if (json.user_profile?.display_name) setDisplayName(json.user_profile.display_name);
     } catch (err) {
       setError(err.message || 'Could not load analytics');
     } finally {
@@ -134,9 +126,9 @@ export default function Analytics() {
   const sessions       = data?.sessions_count ?? 0;
   const slowResponses  = data?.slow_responses_over_3s ?? 0;
 
-  // mock sparkline data (replace with real time-series from backend when available)
-  const querySpark  = [4, 7, 5, 9, 12, 8, 14, 11, totalQueries > 0 ? Math.min(totalQueries, 20) : 6];
-  const ticketSpark = [1, 2, 1, 3, 2, 1, 2, ticketsRaised > 0 ? Math.min(ticketsRaised, 5) : 1];
+  // Real sparkline data from timeline (last 14 days)
+  const querySpark  = (data?.timeline || []).map(d => d.queries);
+  const ticketSpark = (data?.timeline || []).map(d => d.tickets);
 
   // ── loading ───────────────────────────────────────────────────
   if (loading) {

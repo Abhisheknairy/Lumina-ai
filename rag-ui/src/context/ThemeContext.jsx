@@ -4,35 +4,23 @@ const ThemeContext = createContext();
 
 export function ThemeProvider({ children }) {
   const [isDark, setIsDark] = useState(() => {
-    // Check localStorage on initial load
+    // FIX: Removed all console.log debug statements
     const saved = localStorage.getItem('theme');
-    console.log('Initial theme from localStorage:', saved);
     return saved === 'dark';
   });
 
   useEffect(() => {
     const root = document.documentElement;
-    
-    console.log('Theme changed to:', isDark ? 'dark' : 'light');
-    
     if (isDark) {
       root.classList.add('dark');
       localStorage.setItem('theme', 'dark');
-      console.log('Added dark class to HTML');
     } else {
       root.classList.remove('dark');
       localStorage.setItem('theme', 'light');
-      console.log('Removed dark class from HTML');
     }
-    
-    // Verify it was added
-    console.log('HTML has dark class:', root.classList.contains('dark'));
   }, [isDark]);
 
-  const toggleTheme = () => {
-    console.log('Toggle clicked! Current:', isDark);
-    setIsDark(prev => !prev);
-  };
+  const toggleTheme = () => setIsDark(prev => !prev);
 
   return (
     <ThemeContext.Provider value={{ isDark, toggleTheme }}>
