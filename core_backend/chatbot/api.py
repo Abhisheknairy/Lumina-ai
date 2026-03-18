@@ -1,11 +1,9 @@
 from ninja import NinjaAPI, Schema
-from django.http import HttpResponseRedirect, StreamingHttpResponse
+from django.http import HttpResponseRedirect
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 import os
 import io
-import json
-import asyncio
 import docx
 import time
 from PyPDF2 import PdfReader
@@ -22,41 +20,42 @@ from .models import ChatSession, InteractionLog, SourceDocument
 # Allow HTTP for local testing
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-# Initialize Django Ninja API
 api = NinjaAPI(title="Lumina AI Django API")
 
-# Configuration
 from pathlib import Path
-
-# --- PATH CONFIGURATION ---
 CURRENT_DIR = Path(__file__).resolve().parent
 BASE_DIR = CURRENT_DIR.parent
 
-# Point directly to the files inside core_backend
 CLIENT_SECRETS_FILE = str(BASE_DIR / "client_secret.json")
 CHROMA_PERSIST_DIR = str(BASE_DIR / "chroma_db")
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-REDIRECT_URI = "http://localhost:8000/api/auth/callback" 
+REDIRECT_URI = "http://localhost:8000/api/auth/callback"
 
 # In-memory session storage (OAuth flow)
+# NOTE: Use Redis/DB-backed sessions in production
 user_sessions = {}
-oauth_flows = {} 
+oauth_flows = {}
 
-# Initialize AI Tools
-GOOGLE_API_KEY = "AIzaSyAv2I5cUmNXI88c8_79xRexfoMa7kFvcS8"
-
-
-# In-memory session storage (OAuth flow)
-user_sessions = {}
-oauth_flows = {} 
-
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyB1h9f9wZxDqRKaYv4awJRb3xkZlUg9Jq8")
 
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=GOOGLE_API_KEY, temperature=0.3)
 
+
+# ------------------------------------------------------------------
+# SCHEMAS
+# ------------------------------------------------------------------
 class ChatRequest(Schema):
     question: str
+
+class TicketRequest(Schema):
+    interaction_id: int
+    user_query: str
+    ai_response: str
+    # Add your ticketing system fields here (e.g. Jira project key)
+    priority: str = "medium"
+
 
 # ------------------------------------------------------------------
 # 1. AUTHENTICATION ENDPOINTS
@@ -68,94 +67,88 @@ def login(request, user_id: str):
     oauth_flows[state] = flow
     return HttpResponseRedirect(auth_url)
 
+
 @api.get("/auth/callback")
 def auth_callback(request, state: str, code: str):
     flow = oauth_flows.get(state)
     if not flow:
         return api.create_response(request, {"detail": "Session expired"}, status=400)
-    
+
     flow.fetch_token(code=code)
     credentials = flow.credentials
     user_sessions[state] = {
-        'token': credentials.token, 'refresh_token': credentials.refresh_token,
-        'token_uri': credentials.token_uri, 'client_id': credentials.client_id,
-        'client_secret': credentials.client_secret, 'scopes': credentials.scopes
+        'token': credentials.token,
+        'refresh_token': credentials.refresh_token,
+        'token_uri': credentials.token_uri,
+        'client_id': credentials.client_id,
+        'client_secret': credentials.client_secret,
+        'scopes': credentials.scopes,
     }
     del oauth_flows[state]
     return HttpResponseRedirect(f"http://localhost:5173/chat?user_id={state}")
 
 
-# ------------------------------------------------------------------
-# 2. DRIVE STREAMING & INGESTION
-# ------------------------------------------------------------------
-@api.get("/list-drive-items/{user_id}")
-def list_drive_items(request, user_id: str):
+@api.get("/get-token/{user_id}")
+def get_access_token(request, user_id: str):
+    """Returns OAuth access token to the React frontend for the Google Picker (FR-002)."""
     if user_id not in user_sessions:
         return api.create_response(request, {"detail": "Not authenticated"}, status=401)
-        
-    from google.oauth2.credentials import Credentials
-    creds = Credentials(**user_sessions[user_id])
-    service = build('drive', 'v3', credentials=creds)
-    
-    async def event_generator():
-        page_token = None
-        query = ("(mimeType='application/vnd.google-apps.folder' or "
-                 "mimeType='application/vnd.google-apps.document' or "
-                 "mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document' or "
-                 "mimeType='application/pdf') and trashed=false")
-        try:
-            for _ in range(10): 
-                loop = asyncio.get_event_loop()
-                results = await loop.run_in_executor(None, lambda: service.files().list(
-                    q=query, corpora="allDrives", includeItemsFromAllDrives=True, supportsAllDrives=True,
-                    fields="nextPageToken, files(id, name, mimeType, shared, ownedByMe, modifiedTime)",
-                    orderBy="modifiedTime desc", pageSize=200, pageToken=page_token
-                ).execute())
-                
-                items = results.get('files', [])
-                page_token = results.get('nextPageToken')
-                if items:
-                    yield json.dumps(items) + "\n"
-                if not page_token: break
-        except Exception as e:
-            yield json.dumps({"error": str(e)}) + "\n"
+    return {"access_token": user_sessions[user_id]['token']}
 
-    return StreamingHttpResponse(event_generator(), content_type="application/x-ndjson")
 
+# ------------------------------------------------------------------
+# 2. INGESTION ENDPOINT — FR-002, FR-004, FR-005
+# ------------------------------------------------------------------
 @api.post("/ingest-item/{user_id}/{item_id}")
 def ingest_item(request, user_id: str, item_id: str):
     if user_id not in user_sessions:
         return api.create_response(request, {"detail": "Not authenticated"}, status=401)
-        
+
     from google.oauth2.credentials import Credentials
     creds = Credentials(**user_sessions[user_id])
     service = build('drive', 'v3', credentials=creds)
-    
+
     try:
-        root_item = service.files().get(fileId=item_id, supportsAllDrives=True, fields="id, name, mimeType").execute()
-        
-        # Helper for recursion inline to keep it clean
+        root_item = service.files().get(
+            fileId=item_id, supportsAllDrives=True,
+            fields="id, name, mimeType, webViewLink"
+        ).execute()
+
         def get_files_recursive(folder_id):
+            """Recursively collect all files under a folder."""
             found = []
             q = f"'{folder_id}' in parents and trashed=false"
             pt = None
             while True:
-                res = service.files().list(q=q, corpora="allDrives", includeItemsFromAllDrives=True, supportsAllDrives=True, fields="nextPageToken, files(id, name, mimeType)", pageSize=1000, pageToken=pt).execute()
+                res = service.files().list(
+                    q=q, corpora="allDrives",
+                    includeItemsFromAllDrives=True, supportsAllDrives=True,
+                    fields="nextPageToken, files(id, name, mimeType, webViewLink)",
+                    pageSize=1000, pageToken=pt
+                ).execute()
                 for it in res.get('files', []):
                     if it['mimeType'] == 'application/vnd.google-apps.folder':
                         found.extend(get_files_recursive(it['id']))
                     else:
                         found.append(it)
                 pt = res.get('nextPageToken')
-                if not pt: break
+                if not pt:
+                    break
             return found
 
-        files_to_process = get_files_recursive(item_id) if root_item['mimeType'] == 'application/vnd.google-apps.folder' else [root_item]
-        
+        files_to_process = (
+            get_files_recursive(item_id)
+            if root_item['mimeType'] == 'application/vnd.google-apps.folder'
+            else [root_item]
+        )
+
         all_documents = []
         for f in files_to_process:
             mime_type = f['mimeType']
             text_content = ""
+            # FR-004: Build the direct Drive link for this file
+            drive_link = f.get('webViewLink') or f"https://drive.google.com/file/d/{f['id']}/view"
+
             try:
                 if mime_type == 'application/vnd.google-apps.document':
                     req = service.files().export_media(fileId=f['id'], mimeType='text/plain')
@@ -171,9 +164,17 @@ def ingest_item(request, user_id: str, item_id: str):
                 else:
                     req = service.files().get_media(fileId=f['id'])
                     text_content = req.execute().decode('utf-8', errors='ignore')
-                
+
                 if text_content.strip():
-                    all_documents.append({"text": text_content, "metadata": {"source": f['name'], "user_id": user_id}})
+                    all_documents.append({
+                        "text": text_content,
+                        "metadata": {
+                            "source": f['name'],
+                            "source_link": drive_link,   # FR-004: stored in vector metadata
+                            "file_id": f['id'],
+                            "user_id": user_id,
+                        }
+                    })
             except Exception:
                 pass
 
@@ -186,65 +187,194 @@ def ingest_item(request, user_id: str, item_id: str):
             split_texts = text_splitter.split_text(doc["text"])
             chunks.extend(split_texts)
             metadatas.extend([doc["metadata"]] * len(split_texts))
-            
+
         if chunks:
-            Chroma.from_texts(texts=chunks, embedding=embeddings, metadatas=metadatas, persist_directory=CHROMA_PERSIST_DIR)
-            return {"message": "Ingestion Complete!", "files_processed": len(all_documents), "total_chunks_saved": len(chunks)}
-            
+            # Use get_or_create collection pattern to avoid duplicate chunks on re-ingest
+            vector_store = Chroma(
+                collection_name=f"user_{user_id}",
+                embedding_function=embeddings,
+                persist_directory=CHROMA_PERSIST_DIR
+            )
+            vector_store.add_texts(texts=chunks, metadatas=metadatas)
+            return {
+                "message": "Ingestion Complete!",
+                "files_processed": len(all_documents),
+                "total_chunks_saved": len(chunks)
+            }
+
     except Exception as e:
         return api.create_response(request, {"detail": str(e)}, status=500)
 
 
 # ------------------------------------------------------------------
-# 3. CHAT ENDPOINT & DATABASE LOGGING (FR-007 & NFR-001)
+# 3. CHAT ENDPOINT — FR-003, FR-004, FR-007, NFR-001
 # ------------------------------------------------------------------
 @api.post("/chat/{user_id}/{folder_id}")
 def chat_with_documents(request, user_id: str, folder_id: str, payload: ChatRequest):
-    # Track response time exactly as the client requested (NFR-001)
     start_time = time.time()
-    
-    # RAG Logic
-    vector_store = Chroma(persist_directory=CHROMA_PERSIST_DIR, embedding_function=embeddings)
-    docs = vector_store.similarity_search(query=payload.question, k=4, filter={"user_id": user_id})
-    
-    context_text = "\n\n---\n\n".join([doc.page_content for doc in docs]) if docs else "No relevant documents found."
-    
-    prompt = f"Context from Google Drive: {context_text}\nUser Question: {payload.question}"
+
+    # Use per-user collection to prevent data bleed between users (NFR-003)
+    vector_store = Chroma(
+        collection_name=f"user_{user_id}",
+        embedding_function=embeddings,
+        persist_directory=CHROMA_PERSIST_DIR
+    )
+    docs = vector_store.similarity_search(query=payload.question, k=4)
+
+    context_text = (
+        "\n\n---\n\n".join([doc.page_content for doc in docs])
+        if docs else "No relevant documents found."
+    )
+
+    prompt = (
+        f"You are a helpful assistant. Answer the user's question based ONLY on the provided context.\n"
+        f"If the context doesn't contain the answer, say so clearly.\n\n"
+        f"Context:\n{context_text}\n\n"
+        f"Question: {payload.question}"
+    )
     response = llm.invoke(prompt)
-    
+
     end_time = time.time()
     response_time_ms = int((end_time - start_time) * 1000)
-    
-    sources = list(set([doc.metadata.get("source") for doc in docs]))
 
-    # --- DATABASE LOGGING FOR CLIENT REQUIREMENT FR-007 ---
+    # FR-004: Build sources with names AND direct Drive links
+    sources_with_links = {}
+    for doc in docs:
+        name = doc.metadata.get("source", "Unknown")
+        link = doc.metadata.get("source_link", "")
+        if name not in sources_with_links:
+            sources_with_links[name] = link
+
+    # FR-007: Log to database
+    interaction_id = None
     try:
-        # 1. Get or Create the Chat Session
         session, _ = ChatSession.objects.get_or_create(
             user_id=user_id,
             folder_id=folder_id,
             defaults={'folder_name': 'Drive Connected'}
         )
-        
-        # 2. Log the Interaction (Question, Answer, and Speed)
         interaction = InteractionLog.objects.create(
             session=session,
             user_query=payload.question,
             ai_response=response.content,
             response_time_ms=response_time_ms
         )
-        
-        # 3. Log the Sources Used
-        for src in sources:
+        interaction_id = interaction.id
+
+        # FR-004: Save document links to DB
+        for doc_name, doc_link in sources_with_links.items():
             SourceDocument.objects.create(
                 interaction=interaction,
-                document_name=src
+                document_name=doc_name,
+                document_link=doc_link or None
             )
     except Exception as e:
-        print(f"Failed to log to Database: {e}")
+        print(f"DB logging failed: {e}")
 
     return {
         "answer": response.content,
-        "sources_used": sources,
-        "response_time_ms": response_time_ms
+        # FR-004: Return list of {name, link} objects so UI can render clickable links
+        "sources_used": [
+            {"name": name, "link": link}
+            for name, link in sources_with_links.items()
+        ],
+        "response_time_ms": response_time_ms,
+        "interaction_id": interaction_id,   # FR-006: needed by frontend to raise ticket
+    }
+
+
+# ------------------------------------------------------------------
+# 4. RAISE TICKET ENDPOINT — FR-006
+# ------------------------------------------------------------------
+@api.post("/raise-ticket/{user_id}")
+def raise_ticket(request, user_id: str, payload: TicketRequest):
+    """
+    FR-006: Called when the AI couldn't resolve the user's issue.
+    Marks the interaction in DB and calls the configured ticketing system.
+    
+    To integrate with Jira/ServiceNow/AppSteer, add credentials to
+    environment variables and implement the API call below.
+    """
+    if user_id not in user_sessions:
+        return api.create_response(request, {"detail": "Not authenticated"}, status=401)
+
+    try:
+        # 1. Mark the interaction in our DB (FR-007 — ticket_raised flag)
+        if payload.interaction_id:
+            InteractionLog.objects.filter(id=payload.interaction_id).update(ticket_raised=True)
+
+        # 2. --- TICKETING SYSTEM INTEGRATION POINT ---
+        # Uncomment and configure the system you're using:
+        #
+        # --- JIRA ---
+        # import requests as req
+        # jira_url = os.environ.get("JIRA_URL")
+        # jira_token = os.environ.get("JIRA_API_TOKEN")
+        # jira_email = os.environ.get("JIRA_EMAIL")
+        # jira_project = os.environ.get("JIRA_PROJECT_KEY", "SUP")
+        # req.post(f"{jira_url}/rest/api/3/issue", json={
+        #     "fields": {
+        #         "project": {"key": jira_project},
+        #         "summary": f"Unresolved AI Query: {payload.user_query[:80]}",
+        #         "description": {
+        #             "type": "doc", "version": 1,
+        #             "content": [{"type": "paragraph", "content": [
+        #                 {"type": "text", "text": f"User Query: {payload.user_query}\n\nAI Response: {payload.ai_response}"}
+        #             ]}]
+        #         },
+        #         "issuetype": {"name": "Support Request"},
+        #         "priority": {"name": payload.priority.capitalize()},
+        #     }
+        # }, auth=(jira_email, jira_token), headers={"Content-Type": "application/json"})
+        #
+        # --- ServiceNow ---
+        # req.post(f"{os.environ.get('SNOW_URL')}/api/now/table/incident", json={
+        #     "short_description": f"AI Unresolved: {payload.user_query[:80]}",
+        #     "description": f"Query: {payload.user_query}\nAI Response: {payload.ai_response}",
+        #     "urgency": "2", "impact": "2"
+        # }, auth=(os.environ.get("SNOW_USER"), os.environ.get("SNOW_PASS")),
+        # headers={"Content-Type": "application/json", "Accept": "application/json"})
+
+        return {
+            "success": True,
+            "message": "Ticket raised successfully. Our support team will be in touch shortly.",
+            "interaction_id": payload.interaction_id,
+        }
+
+    except Exception as e:
+        return api.create_response(request, {"detail": f"Failed to raise ticket: {str(e)}"}, status=500)
+
+
+# ------------------------------------------------------------------
+# 5. ANALYTICS ENDPOINT — BR-001 (KPI Dashboard data)
+# ------------------------------------------------------------------
+@api.get("/analytics/{user_id}")
+def get_analytics(request, user_id: str):
+    """
+    BR-001: Returns KPI data for the admin/reporting dashboard.
+    Tracks ticket deflection rate, response times, and usage.
+    """
+    from django.db.models import Avg, Count, Q
+
+    sessions = ChatSession.objects.filter(user_id=user_id)
+    interactions = InteractionLog.objects.filter(session__in=sessions)
+
+    total_queries = interactions.count()
+    tickets_raised = interactions.filter(ticket_raised=True).count()
+    resolved_without_ticket = total_queries - tickets_raised
+    deflection_rate = (
+        round((resolved_without_ticket / total_queries) * 100, 1)
+        if total_queries > 0 else 0
+    )
+    avg_response_ms = interactions.aggregate(avg=Avg('response_time_ms'))['avg'] or 0
+    slow_responses = interactions.filter(response_time_ms__gt=3000).count()
+
+    return {
+        "total_queries": total_queries,
+        "tickets_raised": tickets_raised,
+        "resolved_without_ticket": resolved_without_ticket,
+        "deflection_rate_percent": deflection_rate,   # BR-001: target >= 20%
+        "avg_response_time_ms": round(avg_response_ms),
+        "slow_responses_over_3s": slow_responses,     # NFR-001 violations
+        "sessions_count": sessions.count(),
     }

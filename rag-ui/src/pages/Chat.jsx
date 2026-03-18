@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { 
-  Send, Loader2, LogOut, FolderOpen, User, X, Search, 
-  FileText, Bot, Database, Folder, FileIcon, Menu, 
-  Plus, MessageSquare, Paperclip, ChevronDown, Sparkles 
+import {
+  Send, Loader2, LogOut, Plus, MessageSquare,
+  Paperclip, ChevronDown, Sparkles, Bot, Database,
+  FileText, Menu, TicketCheck, ExternalLink, CheckCircle, AlertCircle
 } from 'lucide-react';
 
 export default function Chat() {
@@ -19,185 +19,211 @@ export default function Chat() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [connectedItem, setConnectedItem] = useState(null); 
+  const [connectedItem, setConnectedItem] = useState(null);
   const messagesEndRef = useRef(null);
 
-  // --- DRIVE MODAL STATES ---
-  const [showFolderModal, setShowFolderModal] = useState(false);
-  const [driveItems, setDriveItems] = useState([]);
-  const [isFetchingItems, setIsFetchingItems] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('All'); 
-  const [selectedItem, setSelectedItem] = useState(null);
-  
+  // --- INGESTION STATUS STATES ---
   const [ingestLoading, setIngestLoading] = useState(false);
   const [ingestError, setIngestError] = useState('');
   const [ingestSuccess, setIngestSuccess] = useState('');
 
-  // Mock History Data
+  // --- TICKET STATES (FR-006) ---
+  const [ticketLoading, setTicketLoading] = useState(null); // stores interaction_id being processed
+  const [ticketSuccess, setTicketSuccess] = useState(null); // stores interaction_id that succeeded
+
+  // --- GOOGLE PICKER STATES ---
+  const [oauthToken, setOauthToken] = useState(null);
+  const [pickerApiLoaded, setPickerApiLoaded] = useState(false);
+  const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || "AIzaSyC0OzyJH_I-uI8eWmPs0NYZ1XdhQbMsjb4";
+
   const recentChats = [
     "Q3 Financial Report Analysis",
     "Employee Onboarding Docs",
-    "Project Phoenix Architecture",
-    "Meeting Notes: March 10"
+    "Project Phoenix Architecture"
   ];
 
+  // 1. Auth Check
   useEffect(() => {
-    if (!userId) {
-      navigate('/');
-    }
+    if (!userId) navigate('/');
   }, [userId, navigate]);
 
+  // 2. Scroll to Bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Fetch Files AND Folders using Streaming (Newest First)
+  // 3. Fetch OAuth Token & Load Google Picker Script
   useEffect(() => {
-    const fetchDriveItems = async () => {
-      if (!userId || !showFolderModal) return;
-      
-      setIsFetchingItems(true);
-      setDriveItems([]); // Clear previous items
-      setIngestError('');
-      
-      try {
-        const response = await fetch(`http://localhost:8000/api/list-drive-items/${userId}`);
-        
-        if (!response.body) return;
+    if (!userId) return;
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n").filter(line => line.trim() !== "");
-          
-          for (const line of lines) {
-            try {
-              const newItems = JSON.parse(line);
-              if (newItems.error) throw new Error(newItems.error);
-              setDriveItems(prev => [...prev, ...newItems]);
-              setIsFetchingItems(false); 
-            } catch (e) {
-              console.error("Chunk parsing error", e);
-            }
-          }
-        }
-      } catch (error) {
-        setIngestError("Connection failed. Ensure FastAPI is running.");
-        setIsFetchingItems(false);
-      }
+    fetch(`http://localhost:8000/api/get-token/${userId}`)
+      .then(res => res.json())
+      .then(data => { if (data.access_token) setOauthToken(data.access_token); })
+      .catch(err => console.error("Failed to fetch token", err));
+
+    const script = document.createElement('script');
+    script.src = 'https://apis.google.com/js/api.js';
+    script.onload = () => {
+      window.gapi.load('picker', () => setPickerApiLoaded(true));
     };
-    fetchDriveItems();
-  }, [userId, showFolderModal]);
+    document.body.appendChild(script);
+  }, [userId]);
 
-  const filteredItems = driveItems.filter(item => {
-    const itemName = item.name || '';
-    const matchesSearch = itemName.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    let matchesTab = true;
-    if (activeTab === 'My Drive') {
-      matchesTab = item.ownedByMe === true;
-    } else if (activeTab === 'Shared') {
-      matchesTab = item.shared === true || item.ownedByMe === false;
-    }
-    
-    return matchesSearch && matchesTab;
-  });
-
-  const handleItemSubmit = async () => {
-    if (!selectedItem) return;
-    setIngestLoading(true);
-    setIngestError('');
-    setIngestSuccess(`Connecting to "${selectedItem.name}"...`);
-
-    try {
-      const response = await fetch(`http://localhost:8000/api/ingest-item/${userId}/${selectedItem.id}`, { 
-        method: 'POST' 
-      });
-      const data = await response.json();
-      
-      if (!response.ok) throw new Error(data.detail || 'Failed to ingest item');
-      
-      setIngestSuccess(`Success! Linked ${data.total_chunks_saved || 0} chunks.`);
-      
-      setTimeout(() => {
-        setConnectedItem(selectedItem);
-        setShowFolderModal(false);
-        setIngestSuccess('');
-        if (messages.length === 0) {
-          setMessages([{ 
-            role: 'bot', 
-            content: `I have connected to **${selectedItem.name}**. What would you like to know?`, 
-            sources: [] 
-          }]);
-        }
-      }, 1000);
-    } catch (err) {
-      setIngestError(err.message || 'An error occurred during connection.');
-      setIngestSuccess('');
-    } finally {
-      setIngestLoading(false);
-    }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!input.trim() || loading || !connectedItem) {
-      if (!connectedItem && input.trim()) alert("Please connect a file first using the paperclip icon.");
+  // 4. Open Google Drive Picker (FR-002)
+  const handleOpenPicker = () => {
+    if (!pickerApiLoaded || !oauthToken) {
+      alert("Still loading Google connection. Please try again in a second.");
       return;
     }
 
-    const userMessage = { role: 'user', content: input.trim(), sources: [] };
-    setMessages((prev) => [...prev, userMessage]);
+    const view = new window.google.picker.DocsView(window.google.picker.ViewId.DOCS);
+    view.setIncludeFolders(true);
+    view.setSelectFolderEnabled(true); // FIX: allows folders to be selected
+
+    const picker = new window.google.picker.PickerBuilder()
+      .addView(view)
+      .setOAuthToken(oauthToken)
+      .setDeveloperKey(GOOGLE_API_KEY)
+      .setCallback(pickerCallback)
+      .setTitle("Select a file or folder for Lumina AI")
+      .build();
+
+    picker.setVisible(true);
+  };
+
+  // 5. Handle Picker Selection & Ingestion (FR-002, FR-005)
+  const pickerCallback = async (data) => {
+    if (data.action === window.google.picker.Action.PICKED) {
+      const doc = data.docs[0];
+      const selectedId = doc.id;
+      const selectedName = doc.name;
+
+      setIngestLoading(true);
+      setIngestError('');
+      setIngestSuccess(`Connecting to "${selectedName}"...`);
+
+      try {
+        const response = await fetch(
+          `http://localhost:8000/api/ingest-item/${userId}/${selectedId}`,
+          { method: 'POST' }
+        );
+        const resData = await response.json();
+
+        if (!response.ok) throw new Error(resData.detail || 'Failed to ingest item');
+
+        setIngestSuccess(`✓ Connected to "${selectedName}" — ${resData.files_processed} file(s), ${resData.total_chunks_saved} chunks`);
+        setConnectedItem({ id: selectedId, name: selectedName });
+
+        if (messages.length === 0) {
+          setMessages([{
+            role: 'bot',
+            content: `I've connected to **${selectedName}**. What would you like to know?`,
+            sources: [],
+            interaction_id: null,
+          }]);
+        }
+
+        setTimeout(() => setIngestSuccess(''), 4000);
+      } catch (err) {
+        setIngestError(err.message || 'An error occurred during connection.');
+        setIngestSuccess('');
+        setTimeout(() => setIngestError(''), 5000);
+      } finally {
+        setIngestLoading(false);
+      }
+    }
+  };
+
+  // 6. Handle Chat Submission (FR-003, FR-004)
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!input.trim() || loading) return;
+
+    if (!connectedItem) {
+      alert("Please connect a Drive file or folder first using the paperclip icon.");
+      return;
+    }
+
+    const userMessage = { role: 'user', content: input.trim(), sources: [], interaction_id: null };
+    setMessages(prev => [...prev, userMessage]);
     setInput('');
     setLoading(true);
 
     try {
-      const response = await fetch(`http://localhost:8000/api/chat/${userId}/${connectedItem.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: userMessage.content }),
-      });
+      const response = await fetch(
+        `http://localhost:8000/api/chat/${userId}/${connectedItem.id}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: userMessage.content }),
+        }
+      );
       const data = await response.json();
-      
-      setMessages((prev) => [...prev, { 
-        role: 'bot', 
-        content: data.answer, 
-        sources: data.sources_used || [] 
+
+      setMessages(prev => [...prev, {
+        role: 'bot',
+        content: data.answer,
+        sources: data.sources_used || [],       // FR-004: [{name, link}] objects
+        interaction_id: data.interaction_id,    // FR-006: needed for ticket raising
+        response_time_ms: data.response_time_ms,
       }]);
     } catch (err) {
-      setMessages((prev) => [...prev, { 
-        role: 'bot', 
-        content: 'Server error. Please try again.', 
-        sources: [] 
+      setMessages(prev => [...prev, {
+        role: 'bot',
+        content: 'Server error. Please try again.',
+        sources: [],
+        interaction_id: null,
       }]);
     } finally {
       setLoading(false);
     }
   };
 
-  const renderItemIcon = (mimeType, isSelected) => {
-    if (mimeType === 'application/vnd.google-apps.folder') {
-      return <Folder className={`w-10 h-10 mb-2 ${isSelected ? 'text-blue-600' : 'text-gray-400'}`} fill="currentColor" fillOpacity={0.2} />;
+  // 7. Raise Ticket (FR-006)
+  const handleRaiseTicket = async (message) => {
+    if (!message.interaction_id || ticketLoading || ticketSuccess === message.interaction_id) return;
+
+    setTicketLoading(message.interaction_id);
+    try {
+      const prevUserMsg = messages[messages.findIndex(m => m === message) - 1];
+      const response = await fetch(`http://localhost:8000/api/raise-ticket/${userId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          interaction_id: message.interaction_id,
+          user_query: prevUserMsg?.content || '',
+          ai_response: message.content,
+          priority: 'medium',
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail);
+
+      setTicketSuccess(message.interaction_id);
+    } catch (err) {
+      alert(`Failed to raise ticket: ${err.message}`);
+    } finally {
+      setTicketLoading(null);
     }
-    if (mimeType === 'application/pdf') {
-      return <FileText className={`w-10 h-10 mb-2 ${isSelected ? 'text-red-500' : 'text-red-400'}`} />;
-    }
-    return <FileIcon className={`w-10 h-10 mb-2 ${isSelected ? 'text-blue-500' : 'text-blue-400'}`} />;
+  };
+
+  // --- INGEST STATUS STYLE HELPER (fixes className bug) ---
+  const getIngestStatusStyle = () => {
+    if (ingestError) return 'bg-red-50 text-red-600 border border-red-100';
+    if (ingestSuccess) return 'bg-green-50 text-green-700 border border-green-100';
+    return 'bg-blue-50 text-blue-600 border border-blue-100';
   };
 
   return (
     <div className="flex h-screen bg-white font-sans text-gray-900 overflow-hidden">
-      
-      {/* SIDEBAR */}
+
+      {/* ── SIDEBAR ── */}
       <div className={`${isSidebarOpen ? 'w-72' : 'w-0'} bg-gray-50 border-r border-gray-200 transition-all duration-300 flex flex-col flex-shrink-0 overflow-hidden`}>
         <div className="p-4">
-          <button onClick={() => setMessages([])} className="w-full flex items-center gap-2 px-4 py-3 bg-white border border-gray-200 hover:bg-gray-50 rounded-xl text-sm font-medium transition-all shadow-sm">
+          <button
+            onClick={() => setMessages([])}
+            className="w-full flex items-center gap-2 px-4 py-3 bg-white border border-gray-200 hover:bg-gray-50 rounded-xl text-sm font-medium transition-all shadow-sm"
+          >
             <Plus className="w-4 h-4" /> New Chat
           </button>
         </div>
@@ -206,7 +232,7 @@ export default function Chat() {
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 ml-2">Recent</p>
           <div className="space-y-1">
             {recentChats.map((chat, idx) => (
-              <button key={idx} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-200/50 rounded-lg transition-colors text-left truncate">
+              <button key={idx} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-200/50 rounded-lg transition-colors text-left">
                 <MessageSquare className="w-4 h-4 flex-shrink-0 opacity-50" />
                 <span className="truncate">{chat}</span>
               </button>
@@ -215,6 +241,7 @@ export default function Chat() {
         </div>
 
         <div className="p-4 border-t border-gray-200">
+          {/* Active Source Display */}
           {connectedItem && (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-start gap-3">
               <Database className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
@@ -224,24 +251,32 @@ export default function Chat() {
               </div>
             </div>
           )}
-          <button onClick={() => navigate('/')} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium">
+          <button
+            onClick={() => navigate('/')}
+            className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium"
+          >
             <LogOut className="w-4 h-4" /> Sign Out
           </button>
         </div>
       </div>
 
-      {/* MAIN CONTENT */}
+      {/* ── MAIN CONTENT ── */}
       <div className="flex-1 flex flex-col min-w-0 bg-white relative">
+
+        {/* Header */}
         <header className="h-16 border-b border-gray-100 flex items-center justify-between px-4 sticky top-0 bg-white/80 backdrop-blur-md z-10">
           <div className="flex items-center gap-3">
-            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+            >
               <Menu className="w-5 h-5" />
             </button>
             <h1 className="text-lg font-semibold tracking-tight">Lumina AI</h1>
           </div>
 
           <div className="relative">
-            <button 
+            <button
               onClick={() => setIsProfileOpen(!isProfileOpen)}
               className="flex items-center gap-2 p-1.5 pl-3 hover:bg-gray-100 rounded-full transition-colors border border-transparent hover:border-gray-200"
             >
@@ -256,147 +291,201 @@ export default function Chat() {
               <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-100 rounded-xl shadow-lg py-1 z-50">
                 <div className="px-4 py-2 border-b border-gray-100">
                   <p className="text-sm font-medium text-gray-900 truncate">{userId}</p>
-                  <p className="text-xs text-gray-500">Free Plan</p>
+                  <p className="text-xs text-gray-500">Managed Services</p>
                 </div>
-                <button onClick={() => navigate('/')} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors">Sign out</button>
+                <button
+                  onClick={() => navigate('/')}
+                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  Sign out
+                </button>
               </div>
             )}
           </div>
         </header>
 
+        {/* Messages Area */}
         <div className="flex-1 overflow-y-auto px-4 py-8">
           <div className="max-w-3xl mx-auto space-y-8">
+
+            {/* Empty State */}
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center py-20 text-center px-4">
                 <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mb-6 border border-gray-100 shadow-sm">
                   <Sparkles className="w-8 h-8 text-blue-500" />
                 </div>
                 <h2 className="text-2xl font-semibold mb-2">How can I help you today?</h2>
-                <p className="text-gray-500">Connect a source from Drive using the paperclip to start chatting.</p>
+                <p className="text-gray-500">Connect a Drive file or folder using the paperclip icon to start chatting.</p>
               </div>
             )}
 
+            {/* Message List */}
             {messages.map((message, index) => (
               <div key={index} className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+
                 {message.role === 'bot' && (
-                  <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center flex-shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center flex-shrink-0 mt-1">
                     <Bot className="w-5 h-5 text-white" />
                   </div>
                 )}
+
                 <div className={`max-w-[85%] ${message.role === 'user' ? 'bg-gray-100 text-gray-900 px-5 py-3 rounded-2xl' : 'text-gray-900 pt-1'}`}>
                   <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+
+                  {/* FR-004: Clickable source document links */}
                   {message.sources?.length > 0 && (
-                    <div className="mt-4 pt-3 border-t border-gray-100 flex flex-wrap gap-2">
-                      {message.sources.map((s, idx) => (
-                        <span key={idx} className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200">
-                          <FileText className="w-3 h-3 mr-1 opacity-50"/> {s}
-                        </span>
-                      ))}
+                    <div className="mt-4 pt-3 border-t border-gray-100">
+                      <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-2">Sources</p>
+                      <div className="flex flex-wrap gap-2">
+                        {message.sources.map((source, idx) => {
+                          // Handle both {name, link} objects and plain strings (backwards compat)
+                          const name = typeof source === 'object' ? source.name : source;
+                          const link = typeof source === 'object' ? source.link : null;
+
+                          return link ? (
+                            <a
+                              key={idx}
+                              href={link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100 hover:bg-blue-100 transition-colors"
+                            >
+                              <FileText className="w-3 h-3 opacity-70" />
+                              {name}
+                              <ExternalLink className="w-3 h-3 opacity-50" />
+                            </a>
+                          ) : (
+                            <span key={idx} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200">
+                              <FileText className="w-3 h-3 opacity-50" />
+                              {name}
+                            </span>
+                          );
+                        })}
+                      </div>
+
+                      {/* FR-006: Raise Ticket Button */}
+                      {message.interaction_id && (
+                        <div className="mt-3">
+                          {ticketSuccess === message.interaction_id ? (
+                            <div className="inline-flex items-center gap-1.5 text-xs text-green-600 font-medium">
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              Ticket raised — support team notified
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => handleRaiseTicket(message)}
+                              disabled={ticketLoading === message.interaction_id}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:text-orange-600 hover:bg-orange-50 border border-gray-200 hover:border-orange-200 transition-all disabled:opacity-50"
+                            >
+                              {ticketLoading === message.interaction_id
+                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                : <TicketCheck className="w-3.5 h-3.5" />
+                              }
+                              This didn't resolve my issue — raise a ticket
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* FR-006: Show raise ticket even when no sources but bot responded */}
+                  {message.role === 'bot' && message.interaction_id && !message.sources?.length && (
+                    <div className="mt-3">
+                      {ticketSuccess === message.interaction_id ? (
+                        <div className="inline-flex items-center gap-1.5 text-xs text-green-600 font-medium">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          Ticket raised — support team notified
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleRaiseTicket(message)}
+                          disabled={ticketLoading === message.interaction_id}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:text-orange-600 hover:bg-orange-50 border border-gray-200 hover:border-orange-200 transition-all disabled:opacity-50"
+                        >
+                          {ticketLoading === message.interaction_id
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <TicketCheck className="w-3.5 h-3.5" />
+                          }
+                          This didn't resolve my issue — raise a ticket
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
               </div>
             ))}
-            {loading && <div className="flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>}
+
+            {loading && (
+              <div className="flex gap-4 justify-start">
+                <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center flex-shrink-0">
+                  <Bot className="w-5 h-5 text-white" />
+                </div>
+                <div className="pt-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
         </div>
 
-        <div className="pt-6 pb-10 px-4">
+        {/* ── INPUT AREA ── */}
+        <div className="pt-2 pb-10 px-4">
           <div className="max-w-3xl mx-auto relative">
-            <form onSubmit={handleSubmit} className="flex items-end shadow-sm border border-gray-200 bg-white rounded-3xl overflow-hidden focus-within:border-black transition-all">
-              <button type="button" onClick={() => setShowFolderModal(true)} className={`p-4 text-gray-400 hover:text-black ${connectedItem ? 'text-blue-500' : ''}`}>
+
+            {/* Ingest Status Banner — FIXED className bug */}
+            {(ingestLoading || ingestSuccess || ingestError) && (
+              <div className={`mb-3 px-4 py-2 rounded-lg text-sm flex items-center justify-center font-medium transition-all ${getIngestStatusStyle()}`}>
+                {ingestLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {!ingestLoading && ingestError && <AlertCircle className="w-4 h-4 mr-2" />}
+                {!ingestLoading && ingestSuccess && <CheckCircle className="w-4 h-4 mr-2" />}
+                {ingestError || ingestSuccess || "Processing document..."}
+              </div>
+            )}
+
+            <form
+              onSubmit={handleSubmit}
+              className="flex items-end shadow-sm border border-gray-200 bg-white rounded-3xl overflow-hidden focus-within:border-black transition-all"
+            >
+              <button
+                type="button"
+                onClick={handleOpenPicker}
+                className={`p-4 transition-colors ${connectedItem ? 'text-blue-500 hover:text-blue-700' : 'text-gray-400 hover:text-black'}`}
+                title="Connect Google Drive file or folder"
+              >
                 <Paperclip className="w-5 h-5" />
               </button>
+
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e); }}}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit(e);
+                  }
+                }}
                 placeholder={connectedItem ? `Chat about "${connectedItem.name}"...` : "Attach a Drive file to start..."}
                 className="w-full py-4 bg-transparent resize-none outline-none text-sm"
                 rows="1"
               />
-              <button type="submit" disabled={!input.trim() || loading} className="p-3 mb-1 mr-2 bg-black text-white rounded-full disabled:opacity-20">
+
+              <button
+                type="submit"
+                disabled={!input.trim() || loading}
+                className="p-3 mb-1 mr-2 bg-black text-white rounded-full disabled:opacity-20 transition-opacity"
+              >
                 <Send className="w-4 h-4" />
               </button>
             </form>
+
+            <p className="text-center text-xs text-gray-400 mt-3">
+              Lumina AI can make mistakes. Verify important information from source documents.
+            </p>
           </div>
         </div>
       </div>
-
-      {/* MODAL */}
-      {showFolderModal && (
-        <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-4xl h-[80vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between p-4 px-6 border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <Database className="w-5 h-5 text-blue-600" />
-                <h2 className="text-lg font-semibold">Select Drive Source</h2>
-              </div>
-              <button onClick={() => setShowFolderModal(false)} className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-full">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="px-6 pt-4 border-b border-gray-100">
-              <div className="relative mb-4">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-full py-2.5 pl-11 outline-none focus:border-blue-500 text-sm"
-                />
-              </div>
-              <div className="flex gap-6">
-                {['All', 'My Drive', 'Shared'].map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`pb-3 text-sm font-medium border-b-2 transition-all ${activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'}`}
-                  >
-                    {tab}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto bg-gray-50/50 p-6">
-              {isFetchingItems ? (
-                <div className="h-full flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                  {filteredItems.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => setSelectedItem(item)}
-                      className={`flex flex-col items-center justify-center p-4 rounded-2xl border bg-white h-32 transition-all ${selectedItem?.id === item.id ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-gray-200 hover:shadow-sm'}`}
-                    >
-                      {renderItemIcon(item.mimeType, selectedItem?.id === item.id)}
-                      <span className="text-xs font-medium truncate w-full px-1">{item.name}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 px-6 border-t border-gray-100 flex items-center justify-between">
-              <div className="flex-1 text-sm font-medium">
-                {ingestError && <span className="text-red-600">{ingestError}</span>}
-                {ingestSuccess && <span className="text-blue-600">{ingestSuccess}</span>}
-              </div>
-              <button
-                onClick={handleItemSubmit}
-                disabled={!selectedItem || ingestLoading}
-                className="bg-black text-white px-8 py-2.5 rounded-full disabled:opacity-20 font-medium"
-              >
-                {ingestLoading ? "Linking..." : "Connect"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
