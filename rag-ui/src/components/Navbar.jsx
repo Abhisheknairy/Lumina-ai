@@ -1,148 +1,239 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { 
-  Menu, ChevronDown, LogOut, 
-  MessageSquare, BarChart2, Moon, Sun 
+import {
+  MessageSquare, BarChart2, Moon, Sun,
+  ShieldCheck, Users, LogOut, ChevronDown, Menu
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
-// FIX: Helper — never show a raw UUID as a display name
 function safeDisplayName(name) {
   if (!name) return '';
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name);
-  return isUuid ? '' : name;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name) ? '' : name;
 }
 
-export default function Navbar({ 
-  userId, 
-  displayName, 
-  userEmail, 
-  profileLoading = false,
-  onMenuToggle,
-  showMenuButton = false
+function nameFromEmail(email) {
+  if (!email) return '';
+  const local = email.split('@')[0];
+  return local
+    .replace(/_/g, '.')
+    .split('.')
+    .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(' ');
+}
+
+function getInitials(name, email) {
+  const src = (safeDisplayName(name) || nameFromEmail(email)).trim();
+  if (!src) return '?';
+  const words = src.split(/\s+/);
+  if (words.length >= 2) return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+  return words[0][0].toUpperCase();
+}
+
+const SUPER_ADMIN_EMAIL = 'n.abhishek@isteer.com';
+
+export default function Navbar({
+  userId, displayName, userEmail, role,
+  profileLoading = false, onMenuToggle, showMenuButton = false,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isDark, toggleTheme } = useTheme();
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
-  const isChat      = location.pathname === '/chat';
-  const isAnalytics = location.pathname === '/analytics';
+  const path         = location.pathname;
+  const safeName     = safeDisplayName(displayName);
+  const resolvedName = safeName || nameFromEmail(userEmail);
+  const initials     = profileLoading ? '·' : getInitials(displayName, userEmail);
+  const isSuperAdmin   = role === 'super_admin' || userEmail === SUPER_ADMIN_EMAIL;
+  const isAdminOrAbove = role === 'super_admin' || role === 'admin';
 
-  // Safe name — never expose the UUID
-  const safeName   = safeDisplayName(displayName);
-  const initials   = safeName ? safeName.charAt(0).toUpperCase() : 'U';
-  const headerName = profileLoading ? '...' : (safeName || 'My Account');
+  const tabs = [
+    { id: 'chat',      label: 'Chat',          icon: MessageSquare, href: `/chat?user_id=${userId}`,          active: path === '/chat' },
+    { id: 'analytics', label: 'Analytics',     icon: BarChart2,     href: `/analytics?user_id=${userId}`,     active: path === '/analytics' },
+    ...(isAdminOrAbove ? [{ id: 'collab', label: 'Collaboration', icon: Users,       href: `/collaboration?user_id=${userId}`, active: path === '/collaboration' }] : []),
+    ...(isSuperAdmin   ? [{ id: 'admin',  label: 'Admin',         icon: ShieldCheck, href: `/admin?user_id=${userId}`,        active: path === '/admin', isPurple: true }] : []),
+  ];
 
   return (
-    <header className="h-16 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 lg:px-6 bg-white dark:bg-gray-900 z-50 transition-colors duration-300 flex-shrink-0">
-      
-      {/* Left Section */}
-      <div className="flex items-center gap-3 flex-1">
+    <header style={{
+      height: 52,
+      background: 'var(--bg-2)',
+      borderBottom: '1px solid var(--border-sub)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '0 20px',
+      flexShrink: 0,
+      zIndex: 50,
+      boxShadow: 'var(--shadow-sm)',
+    }}>
+
+      {/* Left — wordmark */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         {showMenuButton && (
-          <button 
+          <button
             onClick={onMenuToggle}
-            className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-            aria-label="Toggle sidebar"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 5, borderRadius: 6, color: 'var(--text-3)' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-2)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-3)'; }}
           >
-            <Menu className="w-5 h-5" />
+            <Menu size={16} />
           </button>
         )}
-        
-        <div
-          className="flex items-center gap-2 cursor-pointer"
+        <button
           onClick={() => navigate(`/chat?user_id=${userId}`)}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
         >
-          <span className="text-xl font-bold tracking-tight text-gray-900 dark:text-white hidden sm:block">
+          {/* Notion-style logo: small black square */}
+          <div style={{
+            width: 24, height: 24,
+            background: 'var(--text-1)',
+            borderRadius: 5,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <path d="M2.5 10.5L6.5 2.5L10.5 10.5" stroke="var(--bg-2)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
             Lumina AI
           </span>
-        </div>
-      </div>
-
-      {/* Center — Navigation Tabs */}
-      <div className="flex items-center gap-2 flex-1 justify-center">
-        <button
-          onClick={() => navigate(`/chat?user_id=${userId}`)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-            isChat
-              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-          }`}
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span className="text-sm">Chat</span>
-        </button>
-        
-        <button
-          onClick={() => navigate(`/analytics?user_id=${userId}`)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-            isAnalytics
-              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-          }`}
-        >
-          <BarChart2 className="w-4 h-4" />
-          <span className="text-sm">Analytics</span>
         </button>
       </div>
 
-      {/* Right Section */}
-      <div className="flex items-center gap-2 flex-1 justify-end">
-        {/* Theme Toggle */}
+      {/* Center — tabs */}
+      <nav style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => navigate(tab.href)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '5px 11px',
+              borderRadius: 6,
+              fontSize: 13,
+              fontWeight: tab.active ? 500 : 400,
+              border: 'none',
+              cursor: 'pointer',
+              background: tab.active ? 'var(--bg-3)' : 'transparent',
+              color: tab.active ? 'var(--text-1)' : 'var(--text-2)',
+              transition: 'all 0.12s',
+            }}
+            onMouseEnter={e => {
+              if (!tab.active) {
+                e.currentTarget.style.background = 'var(--bg-3)';
+                e.currentTarget.style.color = 'var(--text-1)';
+              }
+            }}
+            onMouseLeave={e => {
+              if (!tab.active) {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.color = 'var(--text-2)';
+              }
+            }}
+          >
+            <tab.icon size={14} />
+            {tab.label}
+            {tab.isPurple && (
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--purple)', flexShrink: 0 }} />
+            )}
+          </button>
+        ))}
+      </nav>
+
+      {/* Right — theme + profile */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+
+        {/* Theme toggle */}
         <button
           onClick={toggleTheme}
-          className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-          aria-label="Toggle theme"
+          title={isDark ? 'Switch to light' : 'Switch to dark'}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6, borderRadius: 6, color: 'var(--text-3)', display: 'flex' }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-2)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-3)'; }}
         >
-          {isDark ? (
-            <Sun className="w-5 h-5 text-yellow-500" />
-          ) : (
-            <Moon className="w-5 h-5 text-gray-600" />
-          )}
+          {isDark ? <Sun size={15} /> : <Moon size={15} />}
         </button>
 
-        <div className="w-px h-6 bg-gray-200 dark:bg-gray-700" />
+        <div style={{ width: 1, height: 18, background: 'var(--border)', margin: '0 2px' }} />
 
-        {/* Profile Dropdown */}
-        <div className="relative">
+        {/* Profile */}
+        <div style={{ position: 'relative' }}>
           <button
-            onClick={() => setIsProfileOpen(!isProfileOpen)}
-            className="flex items-center gap-2 p-1 pl-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
+            onClick={() => setProfileOpen(!profileOpen)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7,
+              padding: '4px 8px 4px 4px',
+              borderRadius: 7,
+              background: 'none', border: 'none', cursor: 'pointer',
+              transition: 'background 0.12s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-3)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'none'}
           >
-            {/* FIX: Never show UUID — show '...' while loading, 'My Account' as fallback */}
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 hidden sm:block max-w-[140px] truncate">
-              {headerName}
-            </span>
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-sm font-bold shadow-sm">
-              {profileLoading ? '?' : initials}
+            {/* Avatar */}
+            <div style={{
+              width: 26, height: 26, borderRadius: '50%',
+              background: 'var(--accent)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 600, color: '#fff', flexShrink: 0,
+            }}>
+              {profileLoading ? '·' : initials}
             </div>
-            <ChevronDown className="w-4 h-4 text-gray-400 mr-1" />
+            <span style={{ fontSize: 13, color: 'var(--text-2)', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {profileLoading ? '...' : (resolvedName || 'Account')}
+            </span>
+            <ChevronDown size={12} style={{ color: 'var(--text-3)' }} />
           </button>
 
-          {isProfileOpen && (
+          {/* Dropdown */}
+          {profileOpen && (
             <>
-              <div
-                className="fixed inset-0 z-40"
-                onClick={() => setIsProfileOpen(false)}
-              />
-              <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg py-1 z-50">
-                <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                    {safeName || 'My Account'}
+              <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setProfileOpen(false)} />
+              <div style={{
+                position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50,
+                width: 210,
+                background: 'var(--bg-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 10,
+                overflow: 'hidden',
+                boxShadow: 'var(--shadow-md)',
+              }}>
+                {/* User info */}
+                <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-sub)' }}>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--text-1)' }}>
+                    {resolvedName || 'Account'}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
-                    {userEmail || 'Managed Services'}
+                  <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {userEmail}
                   </p>
+                  {isSuperAdmin && (
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      marginTop: 7, fontSize: 11, fontWeight: 500,
+                      color: 'var(--purple)',
+                      background: 'rgba(109,40,217,0.08)',
+                      padding: '2px 7px', borderRadius: 4,
+                    }}>
+                      <ShieldCheck size={10} /> Super Admin
+                    </span>
+                  )}
                 </div>
-                <div className="py-1">
-                  <button
-                    onClick={() => { setIsProfileOpen(false); navigate('/'); }}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors font-medium"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    Sign out
-                  </button>
-                </div>
+                {/* Sign out */}
+                <button
+                  onClick={() => { setProfileOpen(false); navigate('/'); }}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 9,
+                    padding: '10px 14px',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--danger)', fontSize: 13,
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--danger-dim)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                >
+                  <LogOut size={14} /> Sign out
+                </button>
               </div>
             </>
           )}
