@@ -7,7 +7,8 @@ export default function AppLayout({
   userId, 
   displayName, 
   userEmail,
-  profileLoading = false,   // FIX: thread loading state down to Navbar
+  role = 'user',
+  profileLoading = false,
   children,
   onNewChat,
   // FIX: accept real sidebar data from Chat page
@@ -65,29 +66,44 @@ export default function AppLayout({
                   </div>
                 ) : (
                   <div className="space-y-1">
-                    {sessionHistory.map(session => (
-                      <button
-                        key={session.id}
-                        onClick={() => onLoadSession?.(session)}
-                        className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg transition-colors text-left ${
-                          activeSessionId === session.id
-                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100'
-                            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-                        }`}
-                      >
-                        <MessageSquare className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
-                          activeSessionId === session.id ? 'text-blue-500' : 'opacity-40'
-                        }`} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">
-                            {session.session_name || 'Untitled Chat'}
-                          </p>
-                          <p className="text-xs text-gray-400 dark:text-gray-500 truncate mt-0.5">
-                            {session.folder_name || 'Drive'}
-                          </p>
-                        </div>
-                      </button>
-                    ))}
+                    {(() => {
+                      const personal = sessionHistory.filter(s => !s.is_shared);
+                      const shared   = sessionHistory.filter(s => s.is_shared);
+                      const renderBtn = (session) => (
+                        <button
+                          key={session.id}
+                          onClick={() => onLoadSession?.(session)}
+                          className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg transition-colors text-left ${
+                            activeSessionId === session.id
+                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100'
+                              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                          }`}
+                        >
+                          <MessageSquare className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
+                            activeSessionId === session.id ? 'text-blue-500' : session.is_shared ? 'text-teal-400 opacity-70' : 'opacity-40'
+                          }`} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium truncate">{session.session_name || 'Untitled Chat'}</p>
+                            <p className="text-xs text-gray-400 dark:text-gray-500 truncate mt-0.5">
+                              {session.is_shared ? `Shared · ${session.kb_name || session.folder_name || 'KB'}` : (session.folder_name || 'Drive')}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                      return (
+                        <>
+                          {personal.map(renderBtn)}
+                          {shared.length > 0 && (
+                            <>
+                              <div className="pt-3 pb-1 px-2">
+                                <p className="text-xs font-semibold text-teal-500 dark:text-teal-400 uppercase tracking-wider">Shared</p>
+                              </div>
+                              {shared.map(renderBtn)}
+                            </>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -180,6 +196,7 @@ export default function AppLayout({
           userId={userId}
           displayName={displayName}
           userEmail={userEmail}
+          role={role}
           profileLoading={profileLoading}
           onMenuToggle={() => setIsSidebarOpen(!isSidebarOpen)}
           showMenuButton={!isSidebarOpen}

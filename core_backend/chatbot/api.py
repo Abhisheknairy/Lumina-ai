@@ -1,13 +1,10 @@
 """
 Lumina AI — Django Ninja API
-Security fixes applied in this version:
-  7. LuminaAuth — Django Ninja HttpBearer guard on ALL protected endpoints
-     - Reads user_id from Authorization: Bearer <user_id> header
-     - Validates that user_id has a live OAuthSession in the DB
-     - Returns 401 automatically for any unauthenticated request
-  8. /login and /auth/callback and /get-token are PUBLIC (needed before auth exists)
-  9. All other endpoints require the Bearer token
-  10. Frontend sends Authorization header on every protected request
+Additions in this version:
+  - Auto-assign super_admin role to n.abhishek@isteer.com on first login
+  - Super Admin endpoints: all users, promote/demote, platform analytics, audit log
+  - Knowledge Base endpoints: create, list, invite members, accept invite
+  - Collaboration: shared chat sessions scoped to a KB
 """
 
 from ninja import NinjaAPI, Schema
@@ -15,17 +12,23 @@ from ninja.security import HttpBearer
 from django.http import HttpResponseRedirect, StreamingHttpResponse
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-import os, io, docx, time, json, hashlib
+import os, io, docx, time, json, hashlib, secrets
 from PyPDF2 import PdfReader
+from typing import Optional, List
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
-import concurrent.futures
-from .models import ChatSession, InteractionLog, SourceDocument, UserProfile, OAuthSession
 
-# ── Only allow insecure transport in development ──────────────────────
+from .models import (
+    ChatSession, InteractionLog, SourceDocument,
+    UserProfile, OAuthSession,
+    KnowledgeBase, KBMembership, AdminAuditLog,
+    SUPER_ADMIN_EMAIL, ROLE_SUPER_ADMIN, ROLE_ADMIN, ROLE_USER,
+    KB_ROLE_VIEWER, KB_ROLE_EDITOR,
+)
+
 if os.environ.get("DJANGO_DEBUG", "False").lower() == "true":
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
@@ -34,12 +37,11 @@ from pathlib import Path
 CURRENT_DIR = Path(__file__).resolve().parent
 BASE_DIR    = CURRENT_DIR.parent
 
-# ── Config from environment ───────────────────────────────────────────
 CLIENT_SECRETS_FILE = os.environ.get("GOOGLE_CLIENT_SECRETS_FILE", str(BASE_DIR / "client_secret.json"))
 CHROMA_PERSIST_DIR  = os.environ.get("CHROMA_PERSIST_DIR", str(BASE_DIR / "chroma_db"))
 REDIRECT_URI        = os.environ.get("OAUTH_REDIRECT_URI", "http://localhost:8000/api/auth/callback")
 FRONTEND_URL        = os.environ.get("FRONTEND_URL", "http://localhost:5173")
-GOOGLE_API_KEY      = os.environ["GOOGLE_API_KEY"]
+GOOGLE_API_KEY      = os.environ.get("GOOGLE_API_KEY", "AIzaSyC0OzyJH_I-uI8eWmPs0NYZ1XdhQbMsjb4")
 
 SCOPES = [
     "openid",
@@ -47,86 +49,44 @@ SCOPES = [
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/userinfo.email",
 ]
-
 CRED_KEYS = {"token", "refresh_token", "token_uri", "client_id", "client_secret", "scopes"}
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# SECURITY: LuminaAuth — the single auth guard for all protected routes
-# ═══════════════════════════════════════════════════════════════════════
+# ── Auth guard ────────────────────────────────────────────────────────
 class LuminaAuth(HttpBearer):
-    """
-    Django Ninja HttpBearer guard.
-
-    How it works:
-      - The frontend sends:  Authorization: Bearer <user_id>
-      - We check if that user_id has a valid OAuthSession in the DB.
-      - If yes  → request proceeds, token (user_id) is available as request.auth
-      - If no   → Ninja automatically returns HTTP 401 before the view runs.
-
-    Why user_id as the Bearer token?
-      The user_id is a UUID generated at login-start and never changes.
-      It is the key to the OAuthSession row which holds the real Google
-      credentials. So "prove you know the user_id" == "prove you went
-      through our OAuth flow", which is the correct trust boundary for
-      this architecture.
-    """
     def authenticate(self, request, token: str) -> str | None:
-        # token here is whatever comes after "Bearer "
-        # Return the token (user_id) if valid, None if invalid.
-        # Returning None causes Ninja to respond with HTTP 401 automatically.
         if OAuthSession.objects.filter(user_id=token).exists():
-            return token          # ← this becomes request.auth in every view
-        return None               # ← Ninja sends 401, view never runs
+            return token
+        return None
 
-
-# Instantiate the guard — attach it to endpoints via auth=lumina_auth
 lumina_auth = LuminaAuth()
-
-# Public API instance — no auth (for login, callback, get-token)
 api = NinjaAPI(title="Lumina AI Django API")
 
 
-# ── Singleton caches ──────────────────────────────────────────────────
-_embeddings_singleton: HuggingFaceEmbeddings | None = None
-_chroma_clients: dict[str, Chroma] = {}
+# ── Singletons ────────────────────────────────────────────────────────
+_embeddings_singleton = None
+_chroma_clients: dict = {}
 
 
-def get_embeddings() -> HuggingFaceEmbeddings:
-    """
-    Lazy singleton.
-    paraphrase-MiniLM-L3-v2  →  2× faster than all-MiniLM-L6-v2,
-    similar retrieval quality for internal document RAG.
-    """
+def get_embeddings():
     global _embeddings_singleton
     if _embeddings_singleton is None:
-        _embeddings_singleton = HuggingFaceEmbeddings(
-            model_name="paraphrase-MiniLM-L3-v2"
-        )
+        _embeddings_singleton = HuggingFaceEmbeddings(model_name="paraphrase-MiniLM-L3-v2")
     return _embeddings_singleton
 
 
-def get_chroma(user_id: str) -> Chroma:
-    global _chroma_clients
-    if user_id not in _chroma_clients:
-        _chroma_clients[user_id] = Chroma(
-            collection_name=f"user_{user_id}",
+def get_chroma(collection_name: str) -> Chroma:
+    if collection_name not in _chroma_clients:
+        _chroma_clients[collection_name] = Chroma(
+            collection_name=collection_name,
             embedding_function=get_embeddings(),
             persist_directory=CHROMA_PERSIST_DIR,
         )
-    return _chroma_clients[user_id]
-
-
-def invalidate_chroma(user_id: str):
-    _chroma_clients.pop(user_id, None)
+    return _chroma_clients[collection_name]
 
 
 # ── DB session helpers ────────────────────────────────────────────────
-CRED_DB_KEYS = ["token", "refresh_token", "token_uri", "client_id", "client_secret", "scopes"]
-
-
 def save_session(user_id: str, credentials, display_name: str = "", email: str = ""):
-    from google.oauth2.credentials import Credentials
     scopes = list(credentials.scopes) if credentials.scopes else []
     OAuthSession.objects.update_or_create(
         user_id=user_id,
@@ -174,14 +134,41 @@ def generate_session_name(question: str) -> str:
     return (name[:60] + "…") if len(name) > 60 else name
 
 
-# ── In-memory OAuth flow store (short-lived, acceptable in-memory) ────
-_oauth_flows: dict[str, Flow] = {}
+def derive_name_from_email(email: str) -> str:
+    if not email:
+        return ""
+    local      = email.split("@")[0]
+    parts      = local.replace("_", ".").split(".")
+    return " ".join(p.capitalize() for p in parts if p)
+
+
+def get_user_role(user_id: str) -> str:
+    try:
+        return UserProfile.objects.get(user_id=user_id).role
+    except UserProfile.DoesNotExist:
+        return ROLE_USER
+
+
+def audit(actor_user_id: str, actor_email: str, action: str,
+          target_user_id: str = "", target_email: str = "", detail: dict = None):
+    AdminAuditLog.objects.create(
+        actor_user_id=actor_user_id,
+        actor_email=actor_email,
+        action=action,
+        target_user_id=target_user_id,
+        target_email=target_email,
+        detail=detail or {},
+    )
+
+
+_oauth_flows: dict = {}
 
 
 # ── SCHEMAS ───────────────────────────────────────────────────────────
 class ChatRequest(Schema):
     question:    str
     folder_name: str = ""
+    kb_id:       Optional[int] = None   # set when chatting in a shared KB
 
 
 class TicketRequest(Schema):
@@ -191,18 +178,25 @@ class TicketRequest(Schema):
     priority:       str = "medium"
 
 
+class CreateKBRequest(Schema):
+    name:        str
+    description: str = ""
+    folder_id:   str
+    folder_name: str = ""
+    member_emails: List[str] = []
+
+
+class UpdateRoleRequest(Schema):
+    target_user_id: str
+    new_role:       str   # "admin" or "user"
+
+
 # ═══════════════════════════════════════════════════════════════════════
-# PUBLIC ENDPOINTS — no auth required
-# These three must be public because they are part of the auth flow itself.
-# /login       → user hasn't authenticated yet, this starts it
-# /auth/callback → Google redirects here, no Bearer token in the URL
-# /get-token   → frontend calls this immediately after callback to get
-#                the access_token for gapi; also used as a "am I logged in?" check
+# 1. AUTH (PUBLIC)
 # ═══════════════════════════════════════════════════════════════════════
 
 @api.get("/login")
 def login(request, user_id: str):
-    """PUBLIC — starts the OAuth flow. No session exists yet."""
     flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES, redirect_uri=REDIRECT_URI)
     auth_url, state = flow.authorization_url(access_type="offline", prompt="consent", state=user_id)
     _oauth_flows[state] = flow
@@ -211,16 +205,16 @@ def login(request, user_id: str):
 
 @api.get("/auth/callback")
 def auth_callback(request, state: str, code: str):
-    """PUBLIC — Google redirects here after consent. Creates the OAuthSession."""
     flow = _oauth_flows.pop(state, None)
     if not flow:
-        return api.create_response(request, {"detail": "Session expired. Please log in again."}, status=400)
-
+        return api.create_response(request, {"detail": "Session expired."}, status=400)
+ 
     flow.fetch_token(code=code)
     credentials  = flow.credentials
-    display_name = state
+    display_name = ""
     email        = ""
-
+ 
+    # ── Step 1: Try People API (best source — has real name) ──────────
     try:
         people_service = build("people", "v1", credentials=credentials)
         profile = people_service.people().get(
@@ -229,270 +223,319 @@ def auth_callback(request, state: str, code: str):
         names  = profile.get("names", [])
         emails = profile.get("emailAddresses", [])
         if names:
-            display_name = names[0].get("displayName", state)
+            display_name = names[0].get("displayName", "")
         if emails:
             email = emails[0].get("value", "")
-    except Exception:
-        pass
-
+        print(f"[auth_callback] People API OK: name={display_name!r} email={email!r}")
+    except Exception as e:
+        print(f"[auth_callback] People API failed: {e}")
+ 
+    # ── Step 2: Extract email from id_token if People API failed ──────
+    # The id_token is a JWT that Google always includes in the OAuth response.
+    # It contains the user's email even when People API is disabled.
+    if not email and credentials.id_token:
+        try:
+            import base64, json as _json
+            # JWT payload is the second segment, base64-encoded
+            payload_b64 = credentials.id_token.split(".")[1]
+            # Add padding if needed
+            padding = 4 - len(payload_b64) % 4
+            if padding != 4:
+                payload_b64 += "=" * padding
+            payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
+            email        = payload.get("email", "")
+            display_name = payload.get("name", display_name)
+            print(f"[auth_callback] id_token fallback: name={display_name!r} email={email!r}")
+        except Exception as e:
+            print(f"[auth_callback] id_token parse failed: {e}")
+ 
+    # ── Step 3: Derive name from email if still blank ─────────────────
+    if not display_name and email:
+        display_name = derive_name_from_email(email)
+        print(f"[auth_callback] Derived name from email: {display_name!r}")
+ 
+    print(f"[auth_callback] Final: email={email!r} name={display_name!r}")
+ 
     save_session(state, credentials, display_name=display_name, email=email)
-    UserProfile.objects.update_or_create(
+ 
+    # ── Auto-assign role ───────────────────────────────────────────────
+    assigned_role = ROLE_SUPER_ADMIN if email == SUPER_ADMIN_EMAIL else ROLE_USER
+ 
+    profile_obj, created = UserProfile.objects.update_or_create(
         user_id=state,
         defaults={"display_name": display_name, "email": email},
     )
-
+ 
+    # Set role — always enforce super_admin for the designated email
+    # Don't demote an existing admin to user on re-login
+    if created:
+        profile_obj.role = assigned_role
+        profile_obj.save(update_fields=["role"])
+    elif assigned_role == ROLE_SUPER_ADMIN and profile_obj.role != ROLE_SUPER_ADMIN:
+        profile_obj.role = ROLE_SUPER_ADMIN
+        profile_obj.save(update_fields=["role"])
+    elif email and profile_obj.email != email:
+        # Email just became available — update it without changing role
+        profile_obj.email = email
+        if not profile_obj.display_name:
+            profile_obj.display_name = display_name
+        profile_obj.save(update_fields=["email", "display_name"])
+ 
+    # Accept any pending KB invitations for this email
+    if email:
+        KBMembership.objects.filter(
+            user_email=email, user_id=""
+        ).update(user_id=state, accepted=True)
+ 
     return HttpResponseRedirect(f"{FRONTEND_URL}/chat?user_id={state}")
 
 
 @api.get("/get-token/{user_id}")
 def get_access_token(request, user_id: str):
-    """
-    PUBLIC — returns OAuth token + profile.
-    This is intentionally public because:
-      1. The frontend calls it right after /callback to get the gapi access_token.
-      2. It doubles as the "is this user authenticated?" check — returns
-         access_token: null if no session exists, which the frontend uses
-         to redirect back to login.
-    An attacker who knows a user_id gets the access_token, but that token
-    is already scoped read-only to Drive and expires in ~1 hour. The real
-    security boundary is the OAuthSession check on all other endpoints.
-    """
-    profile_name  = user_id
-    profile_email = ""
+    display_name = ""
+    email        = ""
+    role         = ROLE_USER
+
     try:
         p = UserProfile.objects.get(user_id=user_id)
-        profile_name  = p.display_name or user_id
-        profile_email = p.email or ""
+        display_name = p.display_name or ""
+        email        = p.email or ""
+        role         = p.role
     except UserProfile.DoesNotExist:
         pass
 
+    if not display_name and email:
+        display_name = derive_name_from_email(email)
+
     session = load_session(user_id)
     if not session:
-        return {"access_token": None, "display_name": profile_name, "email": profile_email}
+        return {"access_token": None, "display_name": display_name, "email": email, "role": role}
+
+    if not display_name:
+        sname = session.get("display_name", "")
+        import re
+        if sname and not re.match(r'^[0-9a-f-]{36}$', sname, re.I):
+            display_name = sname
+    if not email:
+        email = session.get("email", "")
+    if not display_name and email:
+        display_name = derive_name_from_email(email)
 
     return {
         "access_token": session["token"],
-        "display_name": profile_name if profile_name != user_id else (session.get("display_name") or user_id),
-        "email":        profile_email or session.get("email", ""),
+        "display_name": display_name,
+        "email":        email,
+        "role":         role,   # frontend uses this to show/hide admin UI
     }
 
 
+# ── KB invite accept (public — accessed via link)
+@api.get("/kb/accept-invite/{token}")
+def accept_invite(request, token: str, user_id: str = ""):
+    try:
+        kb = KnowledgeBase.objects.get(invite_token=token, is_active=True)
+    except KnowledgeBase.DoesNotExist:
+        return api.create_response(request, {"detail": "Invalid or expired invite link."}, status=404)
+
+    if user_id:
+        KBMembership.objects.filter(kb=kb, user_id="").update(user_id=user_id, accepted=True)
+        KBMembership.objects.filter(kb=kb, user_id=user_id).update(accepted=True)
+
+    return HttpResponseRedirect(f"{FRONTEND_URL}/chat?user_id={user_id}&kb_id={kb.id}&kb_name={kb.name}")
+
+
 # ═══════════════════════════════════════════════════════════════════════
-# PROTECTED ENDPOINTS — all require  Authorization: Bearer <user_id>
-# auth=lumina_auth on each endpoint activates the LuminaAuth guard.
-# If the header is missing or the user_id is not in the DB, Ninja
-# returns HTTP 401 before the view function body runs at all.
-# request.auth is the validated user_id string inside every view.
+# 2. INGESTION (PROTECTED)
 # ═══════════════════════════════════════════════════════════════════════
 
-# ── 2. INGESTION ──────────────────────────────────────────────────────
+import concurrent.futures
+
+
 @api.post("/ingest-item/{user_id}/{item_id}", auth=lumina_auth)
-def ingest_item(request, user_id: str, item_id: str):
-    """
-    PROTECTED. Optimized ingestion:
-      Fix 1 — skip already-ingested files entirely (no re-download, no re-embed)
-      Fix 2 — batch embed all chunks in one model forward pass
-      Fix 3 — parallel download+parse across files (ThreadPoolExecutor)
-      Fix 4 — faster embedding model (paraphrase-MiniLM-L3-v2)
-    """
+def ingest_item(request, user_id: str, item_id: str, kb_id: Optional[int] = None):
     if request.auth != user_id:
         return api.create_response(request, {"detail": "Forbidden"}, status=403)
- 
+
     creds   = get_creds(user_id)
     service = build("drive", "v3", credentials=creds)
- 
+
+    # Shared KB uses shared collection; personal uses per-user collection
+    collection_name = f"kb_{kb_id}" if kb_id else f"user_{user_id}"
+
     try:
         root_item = service.files().get(
             fileId=item_id, supportsAllDrives=True,
             fields="id, name, mimeType, webViewLink"
         ).execute()
- 
-        # ── Collect all files (recursive for folders) ─────────────────
-        def get_files_recursive(folder_id):
-            found, pt = [], None
-            while True:
-                res = service.files().list(
-                    q=f"'{folder_id}' in parents and trashed=false",
-                    corpora="allDrives", includeItemsFromAllDrives=True,
-                    supportsAllDrives=True,
-                    fields="nextPageToken, files(id, name, mimeType, webViewLink)",
-                    pageSize=1000, pageToken=pt,
-                ).execute()
-                for it in res.get("files", []):
-                    if it["mimeType"] == "application/vnd.google-apps.folder":
-                        found.extend(get_files_recursive(it["id"]))
-                    else:
-                        found.append(it)
-                pt = res.get("nextPageToken")
-                if not pt:
-                    break
-            return found
- 
-        files_to_process = (
-            get_files_recursive(item_id)
-            if root_item["mimeType"] == "application/vnd.google-apps.folder"
-            else [root_item]
-        )
- 
-        # ── FIX 1: Skip already-ingested files ────────────────────────
-        # Check if chunk index 0 exists in Chroma for each file.
-        # If it does, the whole file was previously ingested — skip it.
-        # This is the single biggest speed win on re-connects.
-        def is_already_ingested(file_id: str) -> bool:
-            chunk_0_id = hashlib.sha256(
-                f"{user_id}::{file_id}::0".encode()
-            ).hexdigest()
-            try:
-                result = get_chroma(user_id)._collection.get(ids=[chunk_0_id])
-                return len(result["ids"]) > 0
-            except Exception:
-                return False
- 
-        files_to_download = []
-        skipped_count     = 0
-        for f in files_to_process:
-            if is_already_ingested(f["id"]):
-                skipped_count += 1
-            else:
-                files_to_download.append(f)
- 
-        # All files already ingested — return instantly
-        if not files_to_download:
-            return {
-                "message":            "Already up to date — no new files to process.",
-                "files_processed":    0,
-                "files_skipped":      skipped_count,
-                "total_chunks_saved": 0,
-                "item_name":          root_item["name"],
-            }
- 
-        # ── FIX 3: Parallel download + parse ──────────────────────────
-        # File I/O is the bottleneck for multi-file folders.
-        # 4 threads = safe for Drive API rate limits.
-        def download_and_parse(f):
-            mime_type  = f["mimeType"]
-            drive_link = f.get("webViewLink") or f"https://drive.google.com/file/d/{f['id']}/view"
-            try:
-                if mime_type == "application/vnd.google-apps.document":
-                    req = service.files().export_media(fileId=f["id"], mimeType="text/plain")
-                    text_content = req.execute().decode("utf-8")
-                elif mime_type == "application/vnd.google-apps.spreadsheet":
-                    req = service.files().export_media(fileId=f["id"], mimeType="text/csv")
-                    text_content = req.execute().decode("utf-8")
-                elif mime_type == "application/vnd.google-apps.presentation":
-                    req = service.files().export_media(fileId=f["id"], mimeType="text/plain")
-                    text_content = req.execute().decode("utf-8")
-                elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-                    req = service.files().get_media(fileId=f["id"])
-                    doc = docx.Document(io.BytesIO(req.execute()))
-                    text_content = "\n".join([p.text for p in doc.paragraphs])
-                elif mime_type == "application/pdf":
-                    req = service.files().get_media(fileId=f["id"])
-                    pdf = PdfReader(io.BytesIO(req.execute()))
-                    text_content = "\n".join([p.extract_text() for p in pdf.pages if p.extract_text()])
-                else:
-                    req = service.files().get_media(fileId=f["id"])
-                    text_content = req.execute().decode("utf-8", errors="ignore")
- 
-                if text_content.strip():
-                    return {
-                        "text": text_content,
-                        "metadata": {
-                            "source":      f["name"],
-                            "source_link": drive_link,
-                            "file_id":     f["id"],
-                            "user_id":     user_id,
-                        },
-                    }
-            except Exception as e:
-                print(f"[ingest] Skipped '{f.get('name')}': {e}")
-            return None
- 
-        all_documents = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            results = executor.map(download_and_parse, files_to_download)
-            all_documents = [r for r in results if r is not None]
- 
-        if not all_documents:
-            return api.create_response(request, {"detail": "No readable text found in this item."}, status=400)
- 
-        # ── Build chunks with deterministic IDs ───────────────────────
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
-        new_chunks, new_metadatas, new_ids = [], [], []
-        for doc in all_documents:
-            for i, chunk in enumerate(text_splitter.split_text(doc["text"])):
-                new_chunks.append(chunk)
-                new_metadatas.append(doc["metadata"])
-                new_ids.append(
-                    hashlib.sha256(
-                        f"{user_id}::{doc['metadata']['file_id']}::{i}".encode()
-                    ).hexdigest()
-                )
- 
-        if not new_chunks:
-            return api.create_response(request, {"detail": "No text chunks could be extracted."}, status=400)
- 
-        # ── FIX 2: Batch embedding ─────────────────────────────────────
-        # embed_documents() sends ALL chunks through the model in one call.
-        # Avoids per-chunk overhead — up to 10× faster than sequential.
-        print(f"[ingest] Batch encoding {len(new_chunks)} chunks...")
-        embedded_vectors = get_embeddings().embed_documents(new_chunks)
-        print(f"[ingest] Done. Writing to Chroma...")
- 
-        # Write with pre-computed vectors — Chroma won't re-encode
-        vector_store = Chroma(
-            collection_name=f"user_{user_id}",
-            embedding_function=get_embeddings(),
-            persist_directory=CHROMA_PERSIST_DIR,
-        )
-        vector_store._collection.upsert(
-            documents=new_chunks,
-            metadatas=new_metadatas,
-            ids=new_ids,
-            embeddings=embedded_vectors,
-        )
-        invalidate_chroma(user_id)
- 
-        return {
-            "message":            "Ingestion complete!",
-            "files_processed":    len(all_documents),
-            "files_skipped":      skipped_count,
-            "total_chunks_saved": len(new_chunks),
-            "item_name":          root_item["name"],
-        }
- 
     except Exception as e:
         return api.create_response(request, {"detail": str(e)}, status=500)
 
+    def get_files_recursive(folder_id):
+        found, pt = [], None
+        while True:
+            res = service.files().list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                corpora="allDrives", includeItemsFromAllDrives=True,
+                supportsAllDrives=True,
+                fields="nextPageToken, files(id, name, mimeType, webViewLink)",
+                pageSize=1000, pageToken=pt,
+            ).execute()
+            for it in res.get("files", []):
+                if it["mimeType"] == "application/vnd.google-apps.folder":
+                    found.extend(get_files_recursive(it["id"]))
+                else:
+                    found.append(it)
+            pt = res.get("nextPageToken")
+            if not pt:
+                break
+        return found
 
-# ── 3. CHAT (streaming) ───────────────────────────────────────────────
+    files_to_process = (
+        get_files_recursive(item_id)
+        if root_item["mimeType"] == "application/vnd.google-apps.folder"
+        else [root_item]
+    )
+
+    # ── FIX: Check if already indexed before streaming ────────────────
+    def is_already_ingested(file_id: str) -> bool:
+        """Returns True if chunk 0 of this file already exists in Chroma."""
+        chunk_0_id = hashlib.sha256(
+            f"{collection_name}::{file_id}::0".encode()
+        ).hexdigest()
+        try:
+            result = get_chroma(collection_name)._collection.get(ids=[chunk_0_id])
+            return len(result["ids"]) > 0
+        except Exception:
+            return False
+
+    files_to_download = [f for f in files_to_process if not is_already_ingested(f["id"])]
+
+    # All files already indexed — return plain JSON (not streaming)
+    # Frontend detects this by content-type not being ndjson
+    if not files_to_download:
+        return {
+            "already_indexed":    True,
+            "message":            "This folder is already indexed and ready to use.",
+            "files_processed":    0,
+            "files_skipped":      len(files_to_process),
+            "total_chunks_saved": 0,
+            "item_name":          root_item["name"],
+        }
+
+    # ── New/partial folder — stream live progress ─────────────────────
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
+
+    def stream_ingestion():
+        total         = len(files_to_download)
+        all_chunks    = []
+        all_metadatas = []
+        all_ids       = []
+        files_done    = 0
+
+        for idx, f in enumerate(files_to_download):
+            file_name  = f.get("name", f["id"])
+            mime_type  = f["mimeType"]
+            drive_link = f.get("webViewLink") or f"https://drive.google.com/file/d/{f['id']}/view"
+
+            yield json.dumps({"type": "progress", "current": idx+1, "total": total,
+                              "file": file_name, "status": "processing"}) + "\n"
+
+            text_content = ""
+            try:
+                if mime_type == "application/vnd.google-apps.document":
+                    text_content = service.files().export_media(fileId=f["id"], mimeType="text/plain").execute().decode("utf-8")
+                elif mime_type == "application/vnd.google-apps.spreadsheet":
+                    text_content = service.files().export_media(fileId=f["id"], mimeType="text/csv").execute().decode("utf-8")
+                elif mime_type == "application/vnd.google-apps.presentation":
+                    text_content = service.files().export_media(fileId=f["id"], mimeType="text/plain").execute().decode("utf-8")
+                elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                    doc = docx.Document(io.BytesIO(service.files().get_media(fileId=f["id"]).execute()))
+                    text_content = "\n".join([p.text for p in doc.paragraphs])
+                elif mime_type == "application/pdf":
+                    pdf = PdfReader(io.BytesIO(service.files().get_media(fileId=f["id"]).execute()))
+                    text_content = "\n".join([p.extract_text() for p in pdf.pages if p.extract_text()])
+                else:
+                    text_content = service.files().get_media(fileId=f["id"]).execute().decode("utf-8", errors="ignore")
+            except Exception as e:
+                print(f"[ingest] Skipped '{file_name}': {e}")
+                yield json.dumps({"type": "progress", "current": idx+1, "total": total,
+                                  "file": file_name, "status": "skipped"}) + "\n"
+                continue
+
+            if text_content.strip():
+                chunks = text_splitter.split_text(text_content)
+                for i, chunk in enumerate(chunks):
+                    chunk_id = hashlib.sha256(f"{collection_name}::{f['id']}::{i}".encode()).hexdigest()
+                    all_chunks.append(chunk)
+                    all_metadatas.append({
+                        "source": file_name, "source_link": drive_link,
+                        "file_id": f["id"], "user_id": user_id,
+                    })
+                    all_ids.append(chunk_id)
+                files_done += 1
+
+            yield json.dumps({"type": "progress", "current": idx+1, "total": total,
+                              "file": file_name, "status": "done"}) + "\n"
+
+        if all_chunks:
+            yield json.dumps({"type": "progress", "current": total, "total": total,
+                              "file": "", "status": "embedding"}) + "\n"
+            try:
+                embedded = get_embeddings().embed_documents(all_chunks)
+                vs = get_chroma(collection_name)
+                vs._collection.upsert(documents=all_chunks, metadatas=all_metadatas,
+                                      ids=all_ids, embeddings=embedded)
+                _chroma_clients.pop(collection_name, None)
+                yield json.dumps({
+                    "type": "done", "already_indexed": False,
+                    "files_processed": files_done,
+                    "total_chunks_saved": len(all_chunks),
+                    "item_name": root_item["name"],
+                }) + "\n"
+            except Exception as e:
+                yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
+        else:
+            yield json.dumps({"type": "error", "detail": "No readable text found."}) + "\n"
+
+    return StreamingHttpResponse(stream_ingestion(), content_type="application/x-ndjson")
+
+# ═══════════════════════════════════════════════════════════════════════
+# 3. CHAT (PROTECTED, streaming)
+# ═══════════════════════════════════════════════════════════════════════
+
 @api.post("/chat/{user_id}/{folder_id}", auth=lumina_auth)
 def chat_with_documents(request, user_id: str, folder_id: str, payload: ChatRequest):
-    """PROTECTED. Streams LLM response token-by-token as NDJSON."""
     if request.auth != user_id:
         return api.create_response(request, {"detail": "Forbidden"}, status=403)
 
-    start_time   = time.time()
-    vector_store = get_chroma(user_id)
-    docs         = vector_store.similarity_search(query=payload.question, k=4)
+    # For KB chats verify membership
+    kb_obj = None
+    if payload.kb_id:
+        try:
+            kb_obj = KnowledgeBase.objects.get(id=payload.kb_id, is_active=True)
+            if not KBMembership.objects.filter(kb=kb_obj, user_id=user_id, accepted=True).exists():
+                return api.create_response(request, {"detail": "Not a member of this knowledge base."}, status=403)
+        except KnowledgeBase.DoesNotExist:
+            return api.create_response(request, {"detail": "Knowledge base not found."}, status=404)
+
+    collection_name = f"kb_{payload.kb_id}" if payload.kb_id else f"user_{user_id}"
+    start_time      = time.time()
+    vector_store    = get_chroma(collection_name)
+    docs            = vector_store.similarity_search(query=payload.question, k=4)
 
     context_text = (
         "\n\n---\n\n".join([doc.page_content for doc in docs])
         if docs else "No relevant documents found."
     )
     prompt = (
-        "You are a helpful assistant. Answer the user's question based ONLY on the provided context.\n"
-        "If the context doesn't contain the answer, say so clearly.\n\n"
+        "You are a helpful assistant. Answer ONLY from the provided context.\n"
+        "If context doesn't contain the answer, say so clearly.\n\n"
         f"Context:\n{context_text}\n\nQuestion: {payload.question}"
     )
 
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
-        google_api_key=GOOGLE_API_KEY,
-        temperature=0.3,
-    )
+    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=GOOGLE_API_KEY, temperature=0.3)
 
-    sources_with_links: dict[str, str] = {}
+    sources_with_links: dict = {}
     for doc in docs:
         name = doc.metadata.get("source", "Unknown")
         link = doc.metadata.get("source_link", "")
@@ -512,6 +555,7 @@ def chat_with_documents(request, user_id: str, folder_id: str, payload: ChatRequ
             session, created = ChatSession.objects.get_or_create(
                 user_id=user_id,
                 folder_id=folder_id,
+                kb=kb_obj,
                 defaults={
                     "folder_name":  payload.folder_name or folder_id,
                     "session_name": generate_session_name(payload.question),
@@ -539,8 +583,8 @@ def chat_with_documents(request, user_id: str, folder_id: str, payload: ChatRequ
             print(f"[chat] DB logging failed: {e}")
 
         yield json.dumps({
-            "type":             "done",
-            "sources":          [{"name": n, "link": l} for n, l in sources_with_links.items()],
+            "type": "done",
+            "sources": [{"name": n, "link": l} for n, l in sources_with_links.items()],
             "response_time_ms": response_time_ms,
             "interaction_id":   interaction_id,
         }) + "\n"
@@ -548,54 +592,65 @@ def chat_with_documents(request, user_id: str, folder_id: str, payload: ChatRequ
     return StreamingHttpResponse(stream_response(), content_type="application/x-ndjson")
 
 
-# ── 4. SESSION HISTORY ────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+# 4. SESSION HISTORY (PROTECTED)
+# ═══════════════════════════════════════════════════════════════════════
+
 @api.get("/sessions/{user_id}", auth=lumina_auth)
 def get_sessions(request, user_id: str):
-    """PROTECTED."""
     if request.auth != user_id:
         return api.create_response(request, {"detail": "Forbidden"}, status=403)
 
-    sessions = ChatSession.objects.filter(user_id=user_id).order_by("-updated_at")[:50]
-    return [
-        {
+    # Personal sessions
+    personal = ChatSession.objects.filter(user_id=user_id, kb__isnull=True).order_by("-updated_at")[:50]
+
+    # Shared KB sessions the user is a member of
+    member_kbs = KBMembership.objects.filter(user_id=user_id, accepted=True).values_list("kb_id", flat=True)
+    shared = ChatSession.objects.filter(kb_id__in=member_kbs).order_by("-updated_at")[:20]
+
+    def serialise(s, is_shared=False):
+        return {
             "id":            s.id,
             "session_name":  s.session_name or s.folder_name or "Untitled Chat",
             "folder_name":   s.folder_name,
             "folder_id":     s.folder_id,
             "updated_at":    s.updated_at.isoformat(),
             "message_count": s.interactions.count(),
+            "is_shared":     is_shared,
+            "kb_id":         s.kb_id,
+            "kb_name":       s.kb.name if s.kb else None,
         }
-        for s in sessions
-    ]
+
+    return {
+        "personal": [serialise(s) for s in personal],
+        "shared":   [serialise(s, is_shared=True) for s in shared],
+    }
 
 
 @api.get("/sessions/{user_id}/{session_id}/messages", auth=lumina_auth)
 def get_session_messages(request, user_id: str, session_id: int):
-    """PROTECTED."""
     if request.auth != user_id:
         return api.create_response(request, {"detail": "Forbidden"}, status=403)
 
     try:
-        session = ChatSession.objects.get(id=session_id, user_id=user_id)
+        session = ChatSession.objects.get(id=session_id)
+        # Check access — own session or KB member
+        if session.user_id != user_id:
+            if not session.kb or not KBMembership.objects.filter(
+                kb=session.kb, user_id=user_id, accepted=True
+            ).exists():
+                return api.create_response(request, {"detail": "Forbidden"}, status=403)
     except ChatSession.DoesNotExist:
         return api.create_response(request, {"detail": "Session not found"}, status=404)
 
     interactions = session.interactions.prefetch_related("sources").order_by("created_at")
     messages = []
-    for interaction in interactions:
+    for i in interactions:
+        messages.append({"role": "user", "content": i.user_query, "sources": [], "interaction_id": None})
         messages.append({
-            "role": "user", "content": interaction.user_query,
-            "sources": [], "interaction_id": None,
-        })
-        messages.append({
-            "role":             "bot",
-            "content":          interaction.ai_response,
-            "sources":          [
-                {"name": s.document_name, "link": s.document_link or ""}
-                for s in interaction.sources.all()
-            ],
-            "interaction_id":   interaction.id,
-            "response_time_ms": interaction.response_time_ms,
+            "role": "bot", "content": i.ai_response,
+            "sources": [{"name": s.document_name, "link": s.document_link or ""} for s in i.sources.all()],
+            "interaction_id": i.id, "response_time_ms": i.response_time_ms,
         })
 
     return {
@@ -603,33 +658,34 @@ def get_session_messages(request, user_id: str, session_id: int):
         "session_name": session.session_name or session.folder_name,
         "folder_id":    session.folder_id,
         "folder_name":  session.folder_name,
+        "kb_id":        session.kb_id,
+        "kb_name":      session.kb.name if session.kb else None,
         "messages":     messages,
     }
 
 
-# ── 5. RAISE TICKET ───────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+# 5. RAISE TICKET (PROTECTED)
+# ═══════════════════════════════════════════════════════════════════════
+
 @api.post("/raise-ticket/{user_id}", auth=lumina_auth)
 def raise_ticket(request, user_id: str, payload: TicketRequest):
-    """PROTECTED."""
     if request.auth != user_id:
         return api.create_response(request, {"detail": "Forbidden"}, status=403)
-
     try:
         if payload.interaction_id is not None:
             InteractionLog.objects.filter(id=payload.interaction_id).update(ticket_raised=True)
-        return {
-            "success":        True,
-            "message":        "Ticket raised successfully. Support team notified.",
-            "interaction_id": payload.interaction_id,
-        }
+        return {"success": True, "message": "Ticket raised successfully.", "interaction_id": payload.interaction_id}
     except Exception as e:
-        return api.create_response(request, {"detail": f"Failed to raise ticket: {str(e)}"}, status=500)
+        return api.create_response(request, {"detail": str(e)}, status=500)
 
 
-# ── 6. ANALYTICS ──────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+# 6. ANALYTICS (PROTECTED)
+# ═══════════════════════════════════════════════════════════════════════
+
 @api.get("/analytics/{user_id}", auth=lumina_auth)
 def get_analytics(request, user_id: str):
-    """PROTECTED."""
     if request.auth != user_id:
         return api.create_response(request, {"detail": "Forbidden"}, status=403)
 
@@ -644,48 +700,345 @@ def get_analytics(request, user_id: str):
     total_queries           = interactions.count()
     tickets_raised          = interactions.filter(ticket_raised=True).count()
     resolved_without_ticket = total_queries - tickets_raised
-    deflection_rate = (
-        round((resolved_without_ticket / total_queries) * 100, 1)
-        if total_queries > 0 else 0
-    )
+    deflection_rate = round((resolved_without_ticket / total_queries) * 100, 1) if total_queries > 0 else 0
     avg_response_ms = interactions.aggregate(avg=Avg("response_time_ms"))["avg"] or 0
     slow_responses  = interactions.filter(response_time_ms__gt=3000).count()
 
-    last_14_days = timezone.now() - timedelta(days=14)
+    last_14 = timezone.now() - timedelta(days=14)
     daily_data = (
-        interactions.filter(created_at__gte=last_14_days)
+        interactions.filter(created_at__gte=last_14)
         .annotate(date=TruncDate("created_at"))
         .values("date")
         .annotate(queries=Count("id"), tickets=Count("id", filter=Q(ticket_raised=True)))
         .order_by("date")
     )
-    daily_map = {entry["date"].isoformat(): entry for entry in daily_data}
-    timeline  = []
+    daily_map = {e["date"].isoformat(): e for e in daily_data}
+    timeline = []
     for i in range(14):
-        day     = (timezone.now() - timedelta(days=13 - i)).date()
-        day_str = day.isoformat()
-        entry   = daily_map.get(day_str, {})
-        timeline.append({
-            "date":    day_str,
-            "queries": entry.get("queries", 0),
-            "tickets": entry.get("tickets", 0),
-        })
+        day = (timezone.now() - timedelta(days=13 - i)).date()
+        e   = daily_map.get(day.isoformat(), {})
+        timeline.append({"date": day.isoformat(), "queries": e.get("queries", 0), "tickets": e.get("tickets", 0)})
 
     profile = {}
     try:
-        p       = UserProfile.objects.get(user_id=user_id)
-        profile = {"display_name": p.display_name, "email": p.email}
+        p = UserProfile.objects.get(user_id=user_id)
+        profile = {"display_name": p.display_name, "email": p.email, "role": p.role}
     except UserProfile.DoesNotExist:
-        profile = {"display_name": user_id, "email": ""}
+        profile = {"display_name": "", "email": "", "role": ROLE_USER}
 
     return {
+        "total_queries": total_queries, "tickets_raised": tickets_raised,
+        "resolved_without_ticket": resolved_without_ticket,
+        "deflection_rate_percent": deflection_rate,
+        "avg_response_time_ms": round(avg_response_ms),
+        "slow_responses_over_3s": slow_responses,
+        "sessions_count": sessions.count(),
+        "timeline": timeline, "user_profile": profile,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 7. KNOWLEDGE BASE (PROTECTED — admin or above)
+# ═══════════════════════════════════════════════════════════════════════
+
+def require_admin(user_id: str):
+    """Returns True if user is admin or super_admin, False otherwise."""
+    role = get_user_role(user_id)
+    return role in (ROLE_SUPER_ADMIN, ROLE_ADMIN)
+
+
+@api.post("/kb/create", auth=lumina_auth)
+def create_knowledge_base(request, payload: CreateKBRequest):
+    user_id = request.auth
+    if not require_admin(user_id):
+        return api.create_response(request, {"detail": "Admins only."}, status=403)
+
+    try:
+        actor = UserProfile.objects.get(user_id=user_id)
+    except UserProfile.DoesNotExist:
+        return api.create_response(request, {"detail": "Profile not found."}, status=400)
+
+    # Generate unique invite token
+    token = secrets.token_urlsafe(32)
+    while KnowledgeBase.objects.filter(invite_token=token).exists():
+        token = secrets.token_urlsafe(32)
+
+    kb = KnowledgeBase.objects.create(
+        name=payload.name,
+        description=payload.description,
+        folder_id=payload.folder_id,
+        folder_name=payload.folder_name,
+        created_by=user_id,
+        invite_token=token,
+    )
+
+    # Add creator as editor
+    KBMembership.objects.create(kb=kb, user_id=user_id, user_email=actor.email,
+                                role=KB_ROLE_EDITOR, accepted=True)
+
+    # Invite other members by email
+    for email in payload.member_emails:
+        email = email.strip().lower()
+        if email and email != actor.email:
+            # Check if this user already has a profile (already logged in)
+            try:
+                existing = UserProfile.objects.get(email=email)
+                KBMembership.objects.get_or_create(
+                    kb=kb, user_email=email,
+                    defaults={"user_id": existing.user_id, "accepted": True}
+                )
+            except UserProfile.DoesNotExist:
+                # Not yet logged in — membership without user_id, accepted on first login
+                KBMembership.objects.get_or_create(kb=kb, user_email=email)
+
+    audit(user_id, actor.email, "create_kb", detail={"kb_id": kb.id, "kb_name": kb.name})
+
+    invite_link = f"{FRONTEND_URL}/kb/join/{token}"
+    return {
+        "id":           kb.id,
+        "name":         kb.name,
+        "invite_token": token,
+        "invite_link":  invite_link,
+        "folder_id":    kb.folder_id,
+        "folder_name":  kb.folder_name,
+        "member_count": kb.memberships.count(),
+    }
+
+
+@api.get("/kb/list", auth=lumina_auth)
+def list_knowledge_bases(request):
+    """Returns KBs the current user is a member of."""
+    user_id = request.auth
+    member_kb_ids = KBMembership.objects.filter(user_id=user_id, accepted=True).values_list("kb_id", flat=True)
+    kbs = KnowledgeBase.objects.filter(id__in=member_kb_ids, is_active=True)
+    return [
+        {
+            "id":           kb.id,
+            "name":         kb.name,
+            "description":  kb.description,
+            "folder_id":    kb.folder_id,
+            "folder_name":  kb.folder_name,
+            "created_by":   kb.created_by,
+            "member_count": kb.memberships.filter(accepted=True).count(),
+            "invite_link":  f"{FRONTEND_URL}/kb/join/{kb.invite_token}",
+            "is_creator":   kb.created_by == user_id,
+            "created_at":   kb.created_at.isoformat(),
+        }
+        for kb in kbs
+    ]
+
+
+@api.post("/kb/{kb_id}/add-member", auth=lumina_auth)
+def add_kb_member(request, kb_id: int, email: str, role: str = KB_ROLE_VIEWER):
+    user_id = request.auth
+    if not require_admin(user_id):
+        return api.create_response(request, {"detail": "Admins only."}, status=403)
+
+    try:
+        kb = KnowledgeBase.objects.get(id=kb_id)
+    except KnowledgeBase.DoesNotExist:
+        return api.create_response(request, {"detail": "KB not found."}, status=404)
+
+    email = email.strip().lower()
+    try:
+        existing = UserProfile.objects.get(email=email)
+        m, _ = KBMembership.objects.get_or_create(
+            kb=kb, user_email=email,
+            defaults={"user_id": existing.user_id, "role": role, "accepted": True}
+        )
+    except UserProfile.DoesNotExist:
+        m, _ = KBMembership.objects.get_or_create(kb=kb, user_email=email,
+                                                    defaults={"role": role})
+
+    actor = UserProfile.objects.get(user_id=user_id)
+    audit(user_id, actor.email, "add_kb_member", detail={"kb_id": kb_id, "email": email})
+
+    return {"success": True, "invite_link": f"{FRONTEND_URL}/kb/join/{kb.invite_token}"}
+
+
+@api.delete("/kb/{kb_id}", auth=lumina_auth)
+def deactivate_kb(request, kb_id: int):
+    user_id = request.auth
+    if not require_admin(user_id):
+        return api.create_response(request, {"detail": "Admins only."}, status=403)
+    try:
+        kb = KnowledgeBase.objects.get(id=kb_id)
+        kb.is_active = False
+        kb.save(update_fields=["is_active"])
+        actor = UserProfile.objects.get(user_id=user_id)
+        audit(user_id, actor.email, "deactivate_kb", detail={"kb_id": kb_id, "kb_name": kb.name})
+        return {"success": True}
+    except KnowledgeBase.DoesNotExist:
+        return api.create_response(request, {"detail": "Not found."}, status=404)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 8. SUPER ADMIN ENDPOINTS (PROTECTED — super_admin only)
+# ═══════════════════════════════════════════════════════════════════════
+
+def require_super_admin(user_id: str):
+    return get_user_role(user_id) == ROLE_SUPER_ADMIN
+
+
+@api.get("/admin/users", auth=lumina_auth)
+def admin_list_users(request):
+    """Super admin: full list of all users with stats."""
+    user_id = request.auth
+    if not require_super_admin(user_id):
+        return api.create_response(request, {"detail": "Super admin only."}, status=403)
+
+    from django.db.models import Count, Max
+
+    profiles = UserProfile.objects.all().order_by("-last_seen")
+    result = []
+    for p in profiles:
+        sessions = ChatSession.objects.filter(user_id=p.user_id)
+        interactions = InteractionLog.objects.filter(session__in=sessions)
+        result.append({
+            "user_id":        p.user_id,
+            "display_name":   p.display_name,
+            "email":          p.email,
+            "role":           p.role,
+            "last_seen":      p.last_seen.isoformat(),
+            "joined":         p.created_at.isoformat(),
+            "session_count":  sessions.count(),
+            "query_count":    interactions.count(),
+            "tickets_raised": interactions.filter(ticket_raised=True).count(),
+            "files_accessed": SourceDocument.objects.filter(
+                interaction__session__in=sessions
+            ).values("document_name").distinct().count(),
+        })
+    return result
+
+
+@api.post("/admin/update-role", auth=lumina_auth)
+def admin_update_role(request, payload: UpdateRoleRequest):
+    """Super admin: promote or demote a user."""
+    actor_id = request.auth
+    if not require_super_admin(actor_id):
+        return api.create_response(request, {"detail": "Super admin only."}, status=403)
+
+    if payload.new_role not in (ROLE_ADMIN, ROLE_USER):
+        return api.create_response(request, {"detail": "Role must be 'admin' or 'user'."}, status=400)
+
+    try:
+        target = UserProfile.objects.get(user_id=payload.target_user_id)
+    except UserProfile.DoesNotExist:
+        return api.create_response(request, {"detail": "User not found."}, status=404)
+
+    if target.role == ROLE_SUPER_ADMIN:
+        return api.create_response(request, {"detail": "Cannot change super admin role."}, status=403)
+
+    old_role    = target.role
+    target.role = payload.new_role
+    target.save(update_fields=["role"])
+
+    actor = UserProfile.objects.get(user_id=actor_id)
+    audit(
+        actor_id, actor.email,
+        action=f"promote_to_{payload.new_role}" if payload.new_role == ROLE_ADMIN else "demote_to_user",
+        target_user_id=target.user_id,
+        target_email=target.email,
+        detail={"old_role": old_role, "new_role": payload.new_role},
+    )
+
+    return {"success": True, "user_id": target.user_id, "email": target.email, "new_role": target.role}
+
+
+@api.get("/admin/analytics", auth=lumina_auth)
+def admin_platform_analytics(request):
+    """Super admin: platform-wide analytics across all users."""
+    user_id = request.auth
+    if not require_super_admin(user_id):
+        return api.create_response(request, {"detail": "Super admin only."}, status=403)
+
+    from django.db.models import Avg, Count, Q
+    from django.db.models.functions import TruncDate
+    from django.utils import timezone
+    from datetime import timedelta
+
+    all_interactions = InteractionLog.objects.all()
+    total_queries    = all_interactions.count()
+    tickets_raised   = all_interactions.filter(ticket_raised=True).count()
+    resolved         = total_queries - tickets_raised
+    deflection_rate  = round((resolved / total_queries) * 100, 1) if total_queries > 0 else 0
+    avg_response_ms  = all_interactions.aggregate(avg=Avg("response_time_ms"))["avg"] or 0
+    slow_responses   = all_interactions.filter(response_time_ms__gt=3000).count()
+
+    last_14 = timezone.now() - timedelta(days=14)
+    daily_data = (
+        all_interactions.filter(created_at__gte=last_14)
+        .annotate(date=TruncDate("created_at"))
+        .values("date")
+        .annotate(queries=Count("id"), tickets=Count("id", filter=Q(ticket_raised=True)))
+        .order_by("date")
+    )
+    daily_map = {e["date"].isoformat(): e for e in daily_data}
+    timeline = []
+    for i in range(14):
+        day = (timezone.now() - timedelta(days=13 - i)).date()
+        e   = daily_map.get(day.isoformat(), {})
+        timeline.append({"date": day.isoformat(), "queries": e.get("queries", 0), "tickets": e.get("tickets", 0)})
+
+    return {
+        "total_users":             UserProfile.objects.count(),
+        "total_sessions":          ChatSession.objects.count(),
         "total_queries":           total_queries,
         "tickets_raised":          tickets_raised,
-        "resolved_without_ticket": resolved_without_ticket,
+        "resolved_without_ticket": resolved,
         "deflection_rate_percent": deflection_rate,
         "avg_response_time_ms":    round(avg_response_ms),
         "slow_responses_over_3s":  slow_responses,
-        "sessions_count":          sessions.count(),
+        "total_knowledge_bases":   KnowledgeBase.objects.filter(is_active=True).count(),
         "timeline":                timeline,
-        "user_profile":            profile,
     }
+
+
+@api.get("/admin/audit-log", auth=lumina_auth)
+def admin_audit_log(request, limit: int = 100):
+    """Super admin: full audit log of all admin actions."""
+    user_id = request.auth
+    if not require_super_admin(user_id):
+        return api.create_response(request, {"detail": "Super admin only."}, status=403)
+
+    logs = AdminAuditLog.objects.all().order_by("-timestamp")[:limit]
+    return [
+        {
+            "id":             log.id,
+            "actor_email":    log.actor_email,
+            "action":         log.action,
+            "target_email":   log.target_email,
+            "detail":         log.detail,
+            "timestamp":      log.timestamp.isoformat(),
+        }
+        for log in logs
+    ]
+
+
+@api.get("/admin/kb-list", auth=lumina_auth)
+def admin_list_all_kbs(request):
+    """Super admin: all knowledge bases across the platform."""
+    user_id = request.auth
+    if not require_super_admin(user_id):
+        return api.create_response(request, {"detail": "Super admin only."}, status=403)
+
+    kbs = KnowledgeBase.objects.all().order_by("-created_at")
+    result = []
+    for kb in kbs:
+        try:
+            creator = UserProfile.objects.get(user_id=kb.created_by)
+            creator_name = creator.display_name or creator.email
+        except UserProfile.DoesNotExist:
+            creator_name = kb.created_by
+        result.append({
+            "id":           kb.id,
+            "name":         kb.name,
+            "description":  kb.description,
+            "folder_name":  kb.folder_name,
+            "created_by":   creator_name,
+            "is_active":    kb.is_active,
+            "member_count": kb.memberships.filter(accepted=True).count(),
+            "session_count": kb.sessions.count(),
+            "created_at":   kb.created_at.isoformat(),
+        })
+    return result
