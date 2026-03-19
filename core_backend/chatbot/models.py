@@ -152,6 +152,12 @@ class InteractionLog(models.Model):
     ai_response      = models.TextField()
     response_time_ms = models.IntegerField(help_text="Tracked to ensure < 3 seconds (NFR-001)")
     ticket_raised    = models.BooleanField(default=False)
+    
+    # ADD THESE THREE LINES:
+    asked_by_user_id = models.CharField(max_length=255, blank=True, default="")
+    asked_by_display_name = models.CharField(max_length=255, blank=True, default="")
+    asked_by_email   = models.EmailField(blank=True, default="")
+    
     created_at       = models.DateTimeField(auto_now_add=True)
 
     class Meta:

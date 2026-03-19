@@ -8,6 +8,7 @@ import {
   ChevronDown, ChevronUp, Search
 } from 'lucide-react';
 import { authFetch } from '../utils/api';
+import AppLayout from '../components/AppLayout';
 
 const TABS = [
   { id: 'users',     label: 'Users',              icon: Users        },
@@ -58,9 +59,24 @@ export default function SuperAdmin() {
   const [roleLoading, setRoleLoading] = useState(null);
   const [sortField,   setSortField]   = useState('last_seen');
   const [sortAsc,     setSortAsc]     = useState(false);
+  const [displayName,    setDisplayName]    = useState('');
+  const [userEmail,      setUserEmail]      = useState('');
+  const [profileLoading, setProfileLoading] = useState(true);
 
   useEffect(() => { if (!userId) navigate('/'); }, [userId, navigate]);
-  useEffect(() => { fetchTab(activeTab); }, [activeTab, userId]);
+  useEffect(() => {
+    fetchTab(activeTab);
+    if (userId) {
+      fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/api/get-token/${userId}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d.display_name) setDisplayName(d.display_name);
+          if (d.email)        setUserEmail(d.email);
+          setProfileLoading(false);
+        })
+        .catch(() => setProfileLoading(false));
+    }
+  }, [activeTab, userId]);
 
   const fetchTab = async (tab) => {
     if (!userId) return;
@@ -147,44 +163,45 @@ export default function SuperAdmin() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 font-sans">
+    <AppLayout
+      userId={userId}
+      displayName={displayName}
+      userEmail={userEmail}
+      role="super_admin"
+      profileLoading={profileLoading}
+    >
+    <div style={{ height: '100%', overflow: 'auto', background: 'var(--bg)', fontFamily: "'Inter', sans-serif" }}>
 
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate(`/chat?user_id=${userId}`)}
-              className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center">
-                <ShieldCheck className="w-5 h-5 text-white" />
-              </div>
-              <h1 className="text-lg font-semibold text-gray-900 dark:text-white">Super Admin Portal</h1>
-            </div>
+      {/* ── Sub-header: admin tabs + refresh ───────────────────────── */}
+      <div style={{ borderBottom: '1px solid var(--border-sub)', background: 'var(--bg-2)', position: 'sticky', top: 0, zIndex: 10 }}>
+        <div style={{ maxWidth: 1120, margin: '0 auto', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', gap: 2 }}>
+            {TABS.map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '10px 14px',
+                  fontSize: 13, fontWeight: activeTab === tab.id ? 500 : 400,
+                  border: 'none', borderBottom: activeTab === tab.id ? '2px solid var(--purple)' : '2px solid transparent',
+                  background: 'transparent',
+                  color: activeTab === tab.id ? 'var(--purple)' : 'var(--text-2)',
+                  cursor: 'pointer', transition: 'color 0.12s',
+                }}
+                onMouseEnter={e => { if (activeTab !== tab.id) e.currentTarget.style.color = 'var(--text-1)'; }}
+                onMouseLeave={e => { if (activeTab !== tab.id) e.currentTarget.style.color = 'var(--text-2)'; }}
+              >
+                <tab.icon size={14} /> {tab.label}
+              </button>
+            ))}
           </div>
           <button onClick={() => fetchTab(activeTab)}
-            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 dark:hover:text-white px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-            <RefreshCw className="w-4 h-4" /> Refresh
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: 13, border: '1px solid var(--border)', borderRadius: 6, background: 'none', color: 'var(--text-2)', cursor: 'pointer' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; }}>
+            <RefreshCw size={13} /> Refresh
           </button>
         </div>
-
-        {/* Tab bar */}
-        <div className="max-w-7xl mx-auto px-6 flex gap-1 pb-0">
-          {TABS.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.id
-                  ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-white'
-              }`}>
-              <tab.icon className="w-4 h-4" />
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </header>
+      </div>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
 
@@ -482,5 +499,6 @@ export default function SuperAdmin() {
 
       </main>
     </div>
+    </AppLayout>
   );
 }
