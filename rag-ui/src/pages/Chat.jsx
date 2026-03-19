@@ -251,6 +251,8 @@ export default function Chat() {
   const [sessions,        setSessions]        = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [activeSession,   setActiveSession]   = useState(null);
+  const [sessionToDelete, setSessionToDelete] = useState(null); 
+  const [isDeleting, setIsDeleting]           = useState(false);
 
   useEffect(() => { if (!userId) navigate('/'); }, [userId, navigate]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
@@ -345,25 +347,33 @@ export default function Chat() {
     inputRef.current?.focus();
   };
 
-  const handleDeleteSession = async (sessionId) => {
-    if (!window.confirm("Are you sure you want to delete this conversation? This cannot be undone.")) return;
+  // 1. Opens the modal and remembers which session to delete
+  const handleDeleteRequest = (sessionId) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (session) setSessionToDelete(session);
+  };
+
+  // 2. Actually deletes the session when they click "Delete" in the modal
+  const confirmDeleteSession = async () => {
+    if (!sessionToDelete) return;
+    setIsDeleting(true);
     
     try {
-      const res = await authFetch(userId, `/api/sessions/${userId}/${sessionId}`, { method: 'DELETE' });
+      const res = await authFetch(userId, `/api/sessions/${userId}/${sessionToDelete.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.detail || "Failed to delete session");
       }
       
-      // Instantly remove it from the left sidebar
-      setSessions(prev => prev.filter(s => s.id !== sessionId));
-      
-      // If the user just deleted the chat they are currently looking at, clear the screen
-      if (activeSession === sessionId) {
+      setSessions(prev => prev.filter(s => s.id !== sessionToDelete.id));
+      if (activeSession === sessionToDelete.id) {
         newChat();
       }
+      setSessionToDelete(null); // Close the modal
     } catch (err) {
       alert(`Error: ${err.message}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -556,7 +566,7 @@ export default function Chat() {
       sessionsLoading={sessionsLoading}
       activeSessionId={activeSession}
       onLoadSession={loadSession}
-      onDeleteSession={handleDeleteSession} /* <--- ADD THIS NEW LINE */
+      onDeleteSession={handleDeleteRequest} /* <--- ADD THIS NEW LINE */
     >
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)' }}>
 
@@ -773,6 +783,42 @@ export default function Chat() {
         @keyframes dotpulse { 0%,100%{opacity:0.3;transform:scale(0.75)} 50%{opacity:1;transform:scale(1)} }
         @keyframes fadein   { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
       `}</style>
+      {/* ── CUSTOM DELETE CONFIRMATION MODAL ── */}
+      {sessionToDelete && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', boxShadow: 'var(--shadow-md)', width: '100%', maxWidth: 400, padding: 24, animation: 'fadein 0.15s ease' }}>
+            
+            <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600, color: 'var(--text-1)' }}>
+              Delete Conversation
+            </h3>
+            
+            <p style={{ margin: '0 0 24px', fontSize: 13, color: 'var(--text-3)', lineHeight: 1.5 }}>
+              Are you sure you want to delete the chat <strong>"{sessionToDelete.session_name || 'Untitled'}"</strong>? This action cannot be undone.
+            </p>
+            
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setSessionToDelete(null)}
+                disabled={isDeleting}
+                style={{ padding: '8px 16px', background: 'none', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text-2)', fontSize: 13, cursor: 'pointer', transition: 'background 0.1s' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-3)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'none'}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteSession}
+                disabled={isDeleting}
+                style={{ padding: '8px 16px', background: 'var(--danger)', border: 'none', borderRadius: 7, color: '#fff', fontSize: 13, fontWeight: 500, cursor: isDeleting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6, opacity: isDeleting ? 0.7 : 1 }}
+              >
+                {isDeleting && <Loader2 size={13} style={{ animation: 'spin 0.7s linear infinite' }} />}
+                Delete
+              </button>
+            </div>
+            
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }

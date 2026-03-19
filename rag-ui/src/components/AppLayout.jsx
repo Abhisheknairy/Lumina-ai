@@ -26,9 +26,10 @@ import {
   MessageSquare, BarChart2, Users, ShieldCheck,
   Plus, ChevronLeft, ChevronRight, LogOut,
   Moon, Sun, ChevronDown, MessageCircle,
-  TrendingUp, Clock, Database
+  TrendingUp, Clock, Database, Trash2
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+
 
 // ── Helpers ───────────────────────────────────────────────────────────
 function isUUID(s) {
@@ -69,6 +70,7 @@ export default function AppLayout({
   sessionsLoading   = false,
   activeSessionId   = null,
   onLoadSession,
+  onDeleteSession, // <--- ADD THIS RIGHT HERE
   // Analytics context
   analyticsData = null,
 }) {
@@ -231,8 +233,8 @@ export default function AppLayout({
                           Conversations
                         </p>
                         {personal.map(s => (
-                          <SessionBtn key={s.id} session={s} active={activeSessionId === s.id} onLoad={onLoadSession} />
-                        ))}
+  <SessionBtn key={s.id} session={s} active={activeSessionId === s.id} onLoad={onLoadSession} onDelete={onDeleteSession} />
+))}
                       </>
                     )}
                     {shared.length > 0 && (
@@ -241,8 +243,8 @@ export default function AppLayout({
                           Shared
                         </p>
                         {shared.map(s => (
-                          <SessionBtn key={s.id} session={s} active={activeSessionId === s.id} onLoad={onLoadSession} isShared />
-                        ))}
+  <SessionBtn key={s.id} session={s} active={activeSessionId === s.id} onLoad={onLoadSession} isShared onDelete={onDeleteSession} />
+))}
                       </>
                     )}
                   </>
@@ -464,33 +466,70 @@ export default function AppLayout({
 }
 
 // ── Session button ─────────────────────────────────────────────────────
-function SessionBtn({ session, active, onLoad, isShared = false }) {
+function SessionBtn({ session, active, onLoad, isShared = false, onDelete }) {
+  const [isHovered, setIsHovered] = useState(false);
+
   return (
-    <button
+    <div
       onClick={() => onLoad?.(session)}
       style={{
-        width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
-        padding: '6px 9px', borderRadius: 6, border: 'none', cursor: 'pointer',
+        width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '6px 9px', borderRadius: 6, cursor: 'pointer',
         background: active ? 'var(--bg-3)' : 'transparent',
-        marginBottom: 1, textAlign: 'left', transition: 'background 0.1s',
+        marginBottom: 1, transition: 'background 0.1s',
       }}
-      onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--bg-hover)'; }}
-      onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+      onMouseEnter={e => { 
+        setIsHovered(true);
+        if (!active) e.currentTarget.style.background = 'var(--bg-hover)'; 
+      }}
+      onMouseLeave={e => { 
+        setIsHovered(false);
+        if (!active) e.currentTarget.style.background = 'transparent'; 
+      }}
     >
-      <span style={{
-        fontSize: 12, fontWeight: active ? 500 : 400,
-        color: active ? 'var(--text-1)' : 'var(--text-2)',
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        maxWidth: '100%', display: 'block',
-      }}>
-        {session.session_name || 'Untitled'}
-      </span>
-      <span style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>
-        {isShared
-          ? `Shared · ${session.kb_name || session.folder_name || 'KB'}`
-          : (session.folder_name || 'Drive')
-        }
-      </span>
-    </button>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, flex: 1 }}>
+        <span style={{
+          fontSize: 12, fontWeight: active ? 500 : 400,
+          color: active ? 'var(--text-1)' : 'var(--text-2)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          maxWidth: '100%', display: 'block',
+        }}>
+          {session.session_name || 'Untitled'}
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>
+          {isShared
+            ? `Shared · ${session.kb_name || session.folder_name || 'KB'}`
+            : (session.folder_name || 'Drive')
+          }
+        </span>
+      </div>
+
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation(); // Prevents the chat from loading when clicking delete
+            onDelete(session.id);
+          }}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--text-3)',
+            transition: 'all 0.15s ease',
+            opacity: isHovered ? 1 : 0, // Only visible on hover
+            transform: isHovered ? 'scale(1)' : 'scale(0.9)',
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-3)'}
+          title="Delete conversation"
+        >
+          <Trash2 size={13} />
+        </button>
+      )}
+    </div>
   );
 }
