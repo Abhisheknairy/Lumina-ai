@@ -1,38 +1,59 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Plus, Database, Users, Link2, Copy, Check,
+  Plus, Database, Users, Link2, Check, Copy,
   ArrowLeft, Loader2, X, Folder, RefreshCw,
   ExternalLink, Trash2, UserPlus, ChevronRight
 } from 'lucide-react';
 import { authFetch } from '../utils/api';
 
-// FIX: Use env var — never hardcode localhost or API keys
 const API_BASE       = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || '';
+
+// ── Shared style tokens ───────────────────────────────────────────────
+const BTN_BASE = {
+  background: 'none',
+  border: '1px solid var(--border)',
+  borderRadius: 7,
+  cursor: 'pointer',
+  color: 'var(--text-2)',
+  fontSize: 13,
+  fontFamily: 'inherit',
+  transition: 'all 0.12s',
+};
+
+const INPUT_STYLE = {
+  width: '100%',
+  background: 'var(--bg)',
+  border: '1px solid var(--border)',
+  borderRadius: 7,
+  padding: '8px 11px',
+  color: 'var(--text-1)',
+  fontSize: 13,
+  fontFamily: 'inherit',
+  boxSizing: 'border-box',
+};
 
 export default function Collaboration() {
   const [searchParams] = useSearchParams();
   const navigate       = useNavigate();
   const userId         = searchParams.get('user_id');
 
-  const [kbs,          setKbs]          = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [showCreate,   setShowCreate]   = useState(false);
-  const [creating,     setCreating]     = useState(false);
-  const [copiedLink,   setCopiedLink]   = useState(null);
-
-  const [form, setForm] = useState({
-    name: '', description: '', folder_id: '', folder_name: '', member_emails: ''
-  });
-
+  const [kbs,            setKbs]            = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [showCreate,     setShowCreate]     = useState(false);
+  const [creating,       setCreating]       = useState(false);
+  const [copiedId,       setCopiedId]       = useState(null);
   const [addMemberKb,    setAddMemberKb]    = useState(null);
   const [addMemberEmail, setAddMemberEmail] = useState('');
   const [addingMember,   setAddingMember]   = useState(false);
-  const [addMemberResult, setAddMemberResult] = useState(null); // FIX: show link inline
+  const [addResult,      setAddResult]      = useState(null);
+  const [driveReady,     setDriveReady]     = useState(false);
+  const [oauthToken,     setOauthToken]     = useState(null);
 
-  const [driveApiReady, setDriveApiReady] = useState(false);
-  const [oauthToken,    setOauthToken]    = useState(null);
+  const [form, setForm] = useState({
+    name: '', description: '', folder_id: '', folder_name: '', member_emails: '',
+  });
 
   useEffect(() => { if (!userId) navigate('/'); }, [userId, navigate]);
 
@@ -40,60 +61,49 @@ export default function Collaboration() {
     if (!userId) return;
     fetchKBs();
 
-    // FIX: Use API_BASE env var, not hardcoded localhost
     fetch(`${API_BASE}/api/get-token/${userId}`)
       .then(r => r.json())
       .then(async data => {
         if (!data.access_token) return;
         setOauthToken(data.access_token);
 
-        if (window.__gapiPickerLoaded) {
-          setDriveApiReady(true);
-          return;
-        }
+        if (window.__gapiPickerLoaded) { setDriveReady(true); return; }
 
-        const script = document.createElement('script');
-        script.src    = 'https://apis.google.com/js/api.js';
-        script.onload = async () => {
+        const script    = document.createElement('script');
+        script.src      = 'https://apis.google.com/js/api.js';
+        script.onload   = async () => {
           try {
             await new Promise(resolve => window.gapi.load('client:picker', resolve));
-            // FIX: Only init if GOOGLE_API_KEY is set
-            if (GOOGLE_API_KEY) {
-              await window.gapi.client.init({ apiKey: GOOGLE_API_KEY });
-            }
+            if (GOOGLE_API_KEY) await window.gapi.client.init({ apiKey: GOOGLE_API_KEY });
             await window.gapi.client.load('drive', 'v3');
             window.gapi.client.setToken({ access_token: data.access_token });
             window.__gapiPickerLoaded = true;
-            setDriveApiReady(true);
-          } catch (err) {
-            console.error('Collaboration Drive API init failed:', err);
-          }
+            setDriveReady(true);
+          } catch (err) { console.error('Drive picker init failed:', err); }
         };
         document.body.appendChild(script);
       })
-      .catch(err => console.error('Failed to load Drive token for Collaboration:', err));
+      .catch(console.error);
   }, [userId]);
 
   const fetchKBs = async () => {
     setLoading(true);
     try {
-      const res  = await authFetch(userId, `/api/kb/list`);
+      const res  = await authFetch(userId, '/api/kb/list');
       const data = await res.json();
       setKbs(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('Failed to load KBs:', err);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
   };
 
-  const openFolderPicker = () => {
-    if (!driveApiReady || !oauthToken) { alert('Drive still loading, try again.'); return; }
-    // FIX: Guard against missing GOOGLE_API_KEY
-    if (!GOOGLE_API_KEY) { alert('Google API key is not configured. Please set VITE_GOOGLE_API_KEY.'); return; }
+  const openPicker = () => {
+    if (!driveReady || !oauthToken) { alert('Drive is still loading. Please wait.'); return; }
+    if (!GOOGLE_API_KEY) { alert('Google API key not configured.'); return; }
+
     const view = new window.google.picker.DocsView(window.google.picker.ViewId.DOCS);
     view.setIncludeFolders(true);
     view.setSelectFolderEnabled(true);
+
     new window.google.picker.PickerBuilder()
       .addView(view)
       .setOAuthToken(oauthToken)
@@ -104,7 +114,7 @@ export default function Collaboration() {
           setForm(prev => ({ ...prev, folder_id: item.id, folder_name: item.name }));
         }
       })
-      .setTitle('Select Drive folder for this Knowledge Base')
+      .setTitle('Select a folder for this Knowledge Base')
       .build()
       .setVisible(true);
   };
@@ -119,13 +129,13 @@ export default function Collaboration() {
     try {
       const emails = form.member_emails
         .split(/[,\n]/)
-        .map(e => e.trim().toLowerCase())
+        .map(em => em.trim().toLowerCase())
         .filter(Boolean);
 
-      const res  = await authFetch(userId, `/api/kb/create`, {
+      const res  = await authFetch(userId, '/api/kb/create', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
+        body: JSON.stringify({
           name:          form.name,
           description:   form.description,
           folder_id:     form.folder_id,
@@ -134,7 +144,7 @@ export default function Collaboration() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Failed to create KB');
+      if (!res.ok) throw new Error(data.detail || 'Failed to create');
 
       setForm({ name: '', description: '', folder_id: '', folder_name: '', member_emails: '' });
       setShowCreate(false);
@@ -146,26 +156,26 @@ export default function Collaboration() {
     }
   };
 
-  const copyLink = (link, kbId) => {
+  const copyLink = (link, id) => {
     navigator.clipboard.writeText(link).then(() => {
-      setCopiedLink(kbId);
-      setTimeout(() => setCopiedLink(null), 2500);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2500);
     });
   };
 
   const handleAddMember = async (kb) => {
     if (!addMemberEmail.trim()) return;
     setAddingMember(true);
-    setAddMemberResult(null);
+    setAddResult(null);
     try {
-      const res = await authFetch(userId,
+      const res = await authFetch(
+        userId,
         `/api/kb/${kb.id}/add-member?email=${encodeURIComponent(addMemberEmail)}&role=viewer`,
         { method: 'POST' }
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Failed');
-      // FIX: Show invite link inline instead of alert()
-      setAddMemberResult({ link: data.invite_link, email: addMemberEmail });
+      setAddResult({ link: data.invite_link, email: addMemberEmail });
       setAddMemberEmail('');
     } catch (err) {
       alert(`Error: ${err.message}`);
@@ -175,137 +185,221 @@ export default function Collaboration() {
   };
 
   const handleDeactivate = async (kb) => {
-    if (!window.confirm(`Deactivate "${kb.name}"? Members will lose access.`)) return;
+    const confirmed = window.confirm(`Deactivate "${kb.name}"? Members will lose access.`);
+    if (!confirmed) return;
     try {
       await authFetch(userId, `/api/kb/${kb.id}`, { method: 'DELETE' });
       fetchKBs();
-    } catch (err) {
+    } catch {
       alert('Failed to deactivate.');
     }
   };
 
-  const handleOpenKb = (kb) => {
-    navigate(`/chat?user_id=${userId}&kb_id=${kb.id}&kb_name=${encodeURIComponent(kb.name)}&folder_id=${kb.folder_id}&folder_name=${encodeURIComponent(kb.folder_name)}`);
+  const openKb = (kb) => {
+    navigate(
+      `/chat?user_id=${userId}` +
+      `&kb_id=${kb.id}` +
+      `&kb_name=${encodeURIComponent(kb.name)}` +
+      `&folder_id=${kb.folder_id}` +
+      `&folder_name=${encodeURIComponent(kb.folder_name)}`
+    );
+  };
+
+  // ── Icon button shared style ──────────────────────────────────────
+  const iconBtn = {
+    background: 'none',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    padding: 6,
+    cursor: 'pointer',
+    color: 'var(--text-3)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.12s',
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 font-sans">
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: 'inherit', color: 'var(--text-1)' }}>
 
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate(`/chat?user_id=${userId}`)}
-              className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-teal-600 rounded-lg flex items-center justify-center">
-                <Users className="w-5 h-5 text-white" />
-              </div>
-              <h1 className="text-lg font-semibold text-gray-900 dark:text-white">Collaboration</h1>
+      {/* ── Header ─────────────────────────────────────────────────── */}
+      <header style={{ height: 52, background: 'var(--bg-2)', borderBottom: '1px solid var(--border-sub)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', position: 'sticky', top: 0, zIndex: 10, boxShadow: 'var(--shadow-sm)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            onClick={() => navigate(`/chat?user_id=${userId}`)}
+            style={{ ...BTN_BASE, border: 'none', display: 'flex', alignItems: 'center', gap: 5, padding: '4px 8px', fontSize: 13 }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; }}
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+          <div style={{ width: 1, height: 16, background: 'var(--border)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 26, height: 26, borderRadius: 6, background: 'var(--teal-dim)', border: '1px solid var(--teal-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Users size={13} style={{ color: 'var(--teal)' }} />
             </div>
+            <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-1)' }}>Collaboration</span>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={fetchKBs}
-              className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
-              <RefreshCw className="w-4 h-4" />
-            </button>
-            <button onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-xl transition-colors shadow-sm">
-              <Plus className="w-4 h-4" /> New Knowledge Base
-            </button>
-          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            onClick={fetchKBs}
+            style={iconBtn}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-3)'; }}
+          >
+            <RefreshCw size={14} />
+          </button>
+          <button
+            onClick={() => setShowCreate(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 15px', background: 'var(--text-1)', border: 'none', borderRadius: 7, color: 'var(--bg)', fontSize: 13, fontWeight: 500, cursor: 'pointer', transition: 'opacity 0.12s' }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+          >
+            <Plus size={14} /> New knowledge base
+          </button>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
+      {/* ── Main ───────────────────────────────────────────────────── */}
+      <main style={{ maxWidth: 980, margin: '0 auto', padding: '36px 24px' }}>
 
+        {/* Loading */}
+        {loading && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '80px 0', gap: 10, color: 'var(--text-3)' }}>
+            <Loader2 size={16} style={{ animation: 'spin 0.7s linear infinite' }} />
+            <span style={{ fontSize: 14 }}>Loading knowledge bases…</span>
+          </div>
+        )}
+
+        {/* Empty state */}
         {!loading && kbs.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-16 h-16 bg-teal-50 dark:bg-teal-900/20 rounded-2xl flex items-center justify-center mb-4">
-              <Database className="w-8 h-8 text-teal-500" />
+          <div style={{ textAlign: 'center', padding: '80px 0' }}>
+            <div style={{ width: 48, height: 48, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px' }}>
+              <Database size={20} style={{ color: 'var(--text-3)' }} />
             </div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No knowledge bases yet</h2>
-            <p className="text-gray-500 dark:text-gray-400 max-w-md mb-6">
-              Create a shared knowledge base to let your team chat with the same Drive documents.
+            <p style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-1)', margin: '0 0 7px' }}>No knowledge bases yet</p>
+            <p style={{ fontSize: 13, color: 'var(--text-3)', margin: '0 0 28px', maxWidth: 380, marginLeft: 'auto', marginRight: 'auto' }}>
+              Create a shared knowledge base so your team can query the same Drive documents together.
             </p>
-            <button onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-xl transition-colors">
-              <Plus className="w-4 h-4" /> Create your first KB
+            <button
+              onClick={() => setShowCreate(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 18px', background: 'var(--text-1)', border: 'none', borderRadius: 8, color: 'var(--bg)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}
+            >
+              <Plus size={14} /> Create your first KB
             </button>
           </div>
         )}
 
-        {loading && (
-          <div className="flex items-center justify-center py-20 text-gray-400">
-            <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading knowledge bases...
-          </div>
-        )}
-
+        {/* KB grid */}
         {!loading && kbs.length > 0 && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 10 }}>
             {kbs.map(kb => (
-              <div key={kb.id}
-                className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm p-5 hover:shadow-md transition-shadow">
-
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-teal-50 dark:bg-teal-900/30 rounded-xl flex items-center justify-center flex-shrink-0">
-                      <Database className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+              <div
+                key={kb.id}
+                style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '20px 22px', boxShadow: 'var(--shadow-sm)', transition: 'box-shadow 0.12s' }}
+                onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow)'}
+                onMouseLeave={e => e.currentTarget.style.boxShadow = 'var(--shadow-sm)'}
+              >
+                {/* KB header */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--bg-3)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Database size={15} style={{ color: 'var(--text-2)' }} />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-gray-900 dark:text-white">{kb.name}</h3>
-                      <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
-                        <Folder className="w-3 h-3" />{kb.folder_name || kb.folder_id}
+                      <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', margin: 0, letterSpacing: '-0.01em' }}>{kb.name}</p>
+                      <p style={{ fontSize: 12, color: 'var(--text-3)', margin: '2px 0 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Folder size={11} /> {kb.folder_name || kb.folder_id}
                       </p>
                     </div>
                   </div>
                   {kb.is_creator && (
-                    <span className="text-xs bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 px-2 py-0.5 rounded-full font-medium">Creator</span>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--teal)', background: 'var(--teal-dim)', border: '1px solid var(--teal-border)', padding: '2px 7px', borderRadius: 4, flexShrink: 0 }}>
+                      Creator
+                    </span>
                   )}
                 </div>
 
                 {kb.description && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">{kb.description}</p>
+                  <p style={{ fontSize: 13, color: 'var(--text-3)', margin: '0 0 11px', lineHeight: 1.55 }}>{kb.description}</p>
                 )}
 
-                <div className="flex items-center gap-4 text-xs text-gray-400 mb-4 pt-3 border-t border-gray-50 dark:border-gray-800">
-                  <span className="flex items-center gap-1"><Users className="w-3 h-3" />{kb.member_count} member{kb.member_count !== 1 ? 's' : ''}</span>
-                  <span>Created {new Date(kb.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+                {/* Stats */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 12, color: 'var(--text-3)', marginBottom: 14, paddingBottom: 13, borderBottom: '1px solid var(--border-sub)' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Users size={11} /> {kb.member_count} member{kb.member_count !== 1 ? 's' : ''}
+                  </span>
+                  <span>
+                    Created {new Date(kb.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                  </span>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button onClick={() => handleOpenKb(kb)}
-                    className="flex-1 flex items-center justify-center gap-2 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-xl transition-colors">
-                    Open Chat <ChevronRight className="w-4 h-4" />
+                {/* Actions row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  {/* Open chat */}
+                  <button
+                    onClick={() => openKb(kb)}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '7px 12px', background: 'none', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text-2)', fontSize: 13, fontWeight: 500, cursor: 'pointer', transition: 'all 0.12s' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; e.currentTarget.style.borderColor = 'var(--teal-border)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+                  >
+                    Open chat <ChevronRight size={13} />
                   </button>
 
-                  <button onClick={() => copyLink(kb.invite_link, kb.id)} title="Copy invite link"
-                    className="p-2 text-gray-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/30 rounded-xl transition-colors">
-                    {copiedLink === kb.id ? <Check className="w-4 h-4 text-green-500" /> : <Link2 className="w-4 h-4" />}
+                  {/* Copy invite link */}
+                  <button
+                    onClick={() => copyLink(kb.invite_link, kb.id)}
+                    title="Copy invite link"
+                    style={iconBtn}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-3)'; }}
+                  >
+                    {copiedId === kb.id
+                      ? <Check size={14} style={{ color: 'var(--success)' }} />
+                      : <Link2 size={14} />
+                    }
                   </button>
 
+                  {/* Creator-only actions */}
                   {kb.is_creator && (
                     <>
-                      <button onClick={() => { setAddMemberKb(kb); setAddMemberResult(null); }} title="Add member"
-                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-xl transition-colors">
-                        <UserPlus className="w-4 h-4" />
+                      <button
+                        onClick={() => { setAddMemberKb(kb); setAddResult(null); }}
+                        title="Add member"
+                        style={iconBtn}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-3)'; }}
+                      >
+                        <UserPlus size={14} />
                       </button>
-                      <button onClick={() => handleDeactivate(kb)} title="Deactivate KB"
-                        className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-colors">
-                        <Trash2 className="w-4 h-4" />
+                      <button
+                        onClick={() => handleDeactivate(kb)}
+                        title="Deactivate"
+                        style={iconBtn}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--danger-dim)'; e.currentTarget.style.color = 'var(--danger)'; e.currentTarget.style.borderColor = 'var(--danger-bdr)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-3)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+                      >
+                        <Trash2 size={14} />
                       </button>
                     </>
                   )}
                 </div>
 
-                <div className="mt-3 flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2">
-                  <ExternalLink className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                  <span className="text-xs text-gray-400 truncate flex-1">{kb.invite_link}</span>
-                  <button onClick={() => copyLink(kb.invite_link, kb.id)}
-                    className="text-xs text-teal-600 hover:text-teal-700 font-medium flex-shrink-0">
-                    {copiedLink === kb.id ? 'Copied!' : 'Copy'}
+                {/* Invite link strip */}
+                <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, padding: '7px 11px', background: 'var(--bg-3)', borderRadius: 6, border: '1px solid var(--border-sub)' }}>
+                  <ExternalLink size={11} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 11, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
+                    {kb.invite_link}
+                  </span>
+                  <button
+                    onClick={() => copyLink(kb.invite_link, kb.id)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 12, fontWeight: 500, padding: 0, flexShrink: 0 }}
+                    onMouseEnter={e => e.currentTarget.style.color = 'var(--accent-h)'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--accent)'}
+                  >
+                    {copiedId === kb.id ? 'Copied!' : 'Copy'}
                   </button>
                 </div>
               </div>
@@ -314,60 +408,104 @@ export default function Collaboration() {
         )}
       </main>
 
-      {/* ── CREATE KB MODAL ── */}
+      {/* ── Create KB modal ────────────────────────────────────────── */}
       {showCreate && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">New Knowledge Base</h2>
-              <button onClick={() => setShowCreate(false)} className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg">
-                <X className="w-5 h-5" />
-              </button>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 12, width: '100%', maxWidth: 500, overflow: 'hidden', boxShadow: 'var(--shadow-md)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border-sub)' }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)' }}>New knowledge base</span>
+              <button onClick={() => setShowCreate(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', display: 'flex', padding: 3 }}><X size={15} /></button>
             </div>
-            <form onSubmit={handleCreate} className="p-6 space-y-4">
+
+            <form onSubmit={handleCreate} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Name */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name *</label>
-                <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>Name *</label>
+                <input
+                  style={INPUT_STYLE}
+                  value={form.name}
+                  onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
                   placeholder="e.g. Q3 Onboarding Docs"
-                  className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"/>
+                  onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                  onBlur={e => e.target.style.borderColor = 'var(--border)'}
+                />
               </div>
+
+              {/* Description */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-                <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
-                  placeholder="What is this knowledge base for?" rows={2}
-                  className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500 resize-none"/>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>Description</label>
+                <textarea
+                  style={{ ...INPUT_STYLE, resize: 'none', lineHeight: 1.6 }}
+                  rows={2}
+                  value={form.description}
+                  onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+                  placeholder="What is this knowledge base for?"
+                  onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                  onBlur={e => e.target.style.borderColor = 'var(--border)'}
+                />
               </div>
+
+              {/* Drive folder */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Drive Folder *</label>
-                <div className="flex gap-2">
-                  <div className="flex-1 flex items-center gap-2 px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800">
-                    <Folder className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm text-gray-500 dark:text-gray-400 truncate">{form.folder_name || 'No folder selected'}</span>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>Drive folder *</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 11px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7 }}>
+                    <Folder size={13} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, color: form.folder_name ? 'var(--text-1)' : 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {form.folder_name || 'No folder selected'}
+                    </span>
                   </div>
-                  <button type="button" onClick={openFolderPicker}
-                    className="px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                  <button
+                    type="button"
+                    onClick={openPicker}
+                    style={{ ...BTN_BASE, padding: '8px 14px' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; }}
+                  >
                     Browse
                   </button>
                 </div>
               </div>
+
+              {/* Invite members */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Invite Members (emails, one per line or comma-separated)
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>
+                  Invite members
                 </label>
-                <textarea value={form.member_emails} onChange={e => setForm(p => ({ ...p, member_emails: e.target.value }))}
-                  placeholder={"colleague1@isteer.com\ncolleague2@isteer.com"} rows={3}
-                  className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500 resize-none font-mono"/>
-                <p className="text-xs text-gray-400 mt-1">Each person gets a shareable invite link. They'll see this KB in their sidebar after accepting.</p>
+                <textarea
+                  style={{ ...INPUT_STYLE, resize: 'none', lineHeight: 1.6, fontFamily: 'monospace' }}
+                  rows={3}
+                  value={form.member_emails}
+                  onChange={e => setForm(p => ({ ...p, member_emails: e.target.value }))}
+                  placeholder={'colleague1@isteer.com\ncolleague2@isteer.com'}
+                  onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                  onBlur={e => e.target.style.borderColor = 'var(--border)'}
+                />
+                <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+                  Comma or newline-separated. Each gets a unique shareable invite link.
+                </p>
               </div>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowCreate(false)}
-                  className="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowCreate(false)}
+                  style={{ flex: 1, padding: '8px', ...BTN_BASE }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; }}
+                >
                   Cancel
                 </button>
-                <button type="submit" disabled={creating}
-                  className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-60">
-                  {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                  {creating ? 'Creating...' : 'Create Knowledge Base'}
+                <button
+                  type="submit"
+                  disabled={creating}
+                  style={{ flex: 1, padding: '8px', background: 'var(--text-1)', border: 'none', borderRadius: 7, color: 'var(--bg)', fontSize: 13, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: creating ? 0.7 : 1 }}
+                >
+                  {creating
+                    ? <><Loader2 size={13} style={{ animation: 'spin 0.7s linear infinite' }} />Creating…</>
+                    : <><Plus size={13} />Create KB</>
+                  }
                 </button>
               </div>
             </form>
@@ -375,54 +513,76 @@ export default function Collaboration() {
         </div>
       )}
 
-      {/* ── ADD MEMBER MODAL — FIX: show invite link inline ── */}
+      {/* ── Add member modal ────────────────────────────────────────── */}
       {addMemberKb && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800">
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">Add Member to "{addMemberKb.name}"</h2>
-              <button onClick={() => { setAddMemberKb(null); setAddMemberResult(null); }} className="p-1 text-gray-400 hover:text-gray-700 rounded-lg">
-                <X className="w-5 h-5" />
-              </button>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 12, width: '100%', maxWidth: 380, overflow: 'hidden', boxShadow: 'var(--shadow-md)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border-sub)' }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)' }}>Add member</span>
+              <button onClick={() => { setAddMemberKb(null); setAddResult(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', display: 'flex', padding: 3 }}><X size={15} /></button>
             </div>
-            <div className="p-5">
-              {addMemberResult ? (
-                // FIX: Show invite link inline instead of alert()
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
-                    <Check className="w-4 h-4" />
-                    <span className="text-sm font-medium">Invite created for {addMemberResult.email}</span>
+
+            <div style={{ padding: 20 }}>
+              {addResult ? (
+                /* Show invite link result inline — no alert() */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--success)', fontSize: 13 }}>
+                    <Check size={14} /> Invite created for {addResult.email}
                   </div>
-                  <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3">
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1.5">Share this invite link:</p>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-600 dark:text-gray-300 truncate flex-1 font-mono">{addMemberResult.link}</span>
-                      <button onClick={() => copyLink(addMemberResult.link, 'modal')}
-                        className="text-xs text-teal-600 hover:text-teal-700 font-medium flex-shrink-0 flex items-center gap-1">
-                        {copiedLink === 'modal' ? <><Check className="w-3 h-3"/>Copied</> : <><Copy className="w-3 h-3"/>Copy</>}
+                  <div style={{ padding: '10px 13px', background: 'var(--bg-3)', borderRadius: 7, border: '1px solid var(--border)' }}>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 6px' }}>Invite link</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ flex: 1, fontSize: 11, fontFamily: 'monospace', color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {addResult.link}
+                      </span>
+                      <button
+                        onClick={() => copyLink(addResult.link, 'modal')}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 12, fontWeight: 500, padding: 0, display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}
+                      >
+                        {copiedId === 'modal' ? <><Check size={11} />Copied</> : <><Copy size={11} />Copy</>}
                       </button>
                     </div>
                   </div>
-                  <button onClick={() => { setAddMemberResult(null); }}
-                    className="w-full py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                    Add Another
+                  <button
+                    onClick={() => setAddResult(null)}
+                    style={{ padding: '8px', ...BTN_BASE, width: '100%' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; }}
+                  >
+                    Add another
                   </button>
                 </div>
               ) : (
                 <>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Email address</label>
-                  <input value={addMemberEmail} onChange={e => setAddMemberEmail(e.target.value)}
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+                    Email address
+                  </label>
+                  <input
+                    style={{ ...INPUT_STYLE, marginBottom: 13 }}
+                    value={addMemberEmail}
+                    onChange={e => setAddMemberEmail(e.target.value)}
                     placeholder="colleague@isteer.com"
-                    className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500 mb-4"/>
-                  <div className="flex gap-3">
-                    <button onClick={() => setAddMemberKb(null)}
-                      className="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                    onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                    onBlur={e => e.target.style.borderColor = 'var(--border)'}
+                  />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      onClick={() => setAddMemberKb(null)}
+                      style={{ flex: 1, padding: '8px', ...BTN_BASE }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; }}
+                    >
                       Cancel
                     </button>
-                    <button onClick={() => handleAddMember(addMemberKb)} disabled={addingMember}
-                      className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-60">
-                      {addingMember ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                      Add Member
+                    <button
+                      onClick={() => handleAddMember(addMemberKb)}
+                      disabled={addingMember}
+                      style={{ flex: 1, padding: '8px', background: 'var(--text-1)', border: 'none', borderRadius: 7, color: 'var(--bg)', fontSize: 13, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: addingMember ? 0.7 : 1 }}
+                    >
+                      {addingMember
+                        ? <><Loader2 size={13} style={{ animation: 'spin 0.7s linear infinite' }} />Adding…</>
+                        : <><UserPlus size={13} />Add member</>
+                      }
                     </button>
                   </div>
                 </>
@@ -431,6 +591,8 @@ export default function Collaboration() {
           </div>
         </div>
       )}
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

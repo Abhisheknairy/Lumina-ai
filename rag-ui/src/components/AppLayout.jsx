@@ -1,210 +1,251 @@
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Plus, MessageSquare, ChevronLeft, ChevronRight, TrendingUp, BarChart2, Clock } from 'lucide-react';
+import { Plus, MessageSquare, TrendingUp, BarChart2, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
 import Navbar from './Navbar';
 
-export default function AppLayout({ 
-  userId, 
-  displayName, 
+export default function AppLayout({
+  userId,
+  displayName,
   userEmail,
   role = 'user',
   profileLoading = false,
   children,
   onNewChat,
-  // FIX: accept real sidebar data from Chat page
   sessionHistory = [],
   sessionsLoading = false,
   activeSessionId = null,
   onLoadSession,
-  // Analytics sidebar data
   analyticsData = null,
 }) {
-  const location = useLocation();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const location  = useLocation();
+  const [open, setOpen] = useState(true);
+
   const isChat      = location.pathname === '/chat';
   const isAnalytics = location.pathname === '/analytics';
 
-  const totalQueries  = analyticsData?.total_queries ?? 0;
-  const deflection    = analyticsData?.deflection_rate_percent ?? 0;
-  const avgResponseMs = analyticsData?.avg_response_time_ms ?? 0;
+  const totalQueries = analyticsData?.total_queries ?? 0;
+  const deflection   = analyticsData?.deflection_rate_percent ?? 0;
+  const avgMs        = analyticsData?.avg_response_time_ms ?? 0;
+
+  // ── sidebar width ──────────────────────────────────────────────────
+  const sideW = 240;
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
-      
-      {/* Sidebar */}
-      <div
-        className={`${
-          isSidebarOpen ? 'w-64' : 'w-0'
-        } bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-300 ease-in-out overflow-hidden flex-shrink-0 relative`}
-      >
-        <div className="flex flex-col h-full p-4">
-          
-          {/* ── CHAT SIDEBAR ── */}
+    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
+
+      {/* ── Sidebar ─────────────────────────────────────────────────── */}
+      <div style={{
+        width: open ? sideW : 0,
+        flexShrink: 0,
+        background: 'var(--bg-2)',
+        borderRight: '1px solid var(--border-sub)',
+        transition: 'width 0.2s ease',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'relative',
+      }}>
+        {/* Inner — only visible when open */}
+        <div style={{
+          width: sideW,
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          padding: '14px 0 12px',
+          opacity: open ? 1 : 0,
+          transition: 'opacity 0.15s',
+          pointerEvents: open ? 'auto' : 'none',
+        }}>
+
+          {/* ── CHAT sidebar ─────────────────────────────────────────── */}
           {isChat && (
             <>
-              <button
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-medium transition-all shadow-sm hover:shadow-md mb-6"
-                onClick={onNewChat}
-              >
-                <Plus className="w-5 h-5" />
-                New Chat
-              </button>
+              {/* New chat button */}
+              <div style={{ padding: '0 10px', marginBottom: 14 }}>
+                <button
+                  onClick={onNewChat}
+                  style={{
+                    width: '100%',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 12px',
+                    background: 'none',
+                    border: '1px solid var(--border)',
+                    borderRadius: 7,
+                    color: 'var(--text-2)',
+                    fontSize: 13, fontWeight: 500,
+                    cursor: 'pointer',
+                    transition: 'all 0.12s',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = 'var(--bg-3)';
+                    e.currentTarget.style.color = 'var(--text-1)';
+                    e.currentTarget.style.borderColor = 'var(--border)';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = 'none';
+                    e.currentTarget.style.color = 'var(--text-2)';
+                  }}
+                >
+                  <Plus size={14} />
+                  New conversation
+                </button>
+              </div>
 
-              <div className="flex-1 overflow-y-auto">
-                <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3 px-2">
-                  Recent Conversations
-                </p>
+              {/* Section header */}
+              <div style={{ padding: '0 14px 6px', marginTop: 2 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                  Conversations
+                </span>
+              </div>
 
-                {/* FIX: Show real session history instead of placeholder */}
+              {/* Session list */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '0 6px' }}>
                 {sessionsLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: 28 }}>
+                    <div style={{ width: 16, height: 16, border: '1.5px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
                   </div>
                 ) : sessionHistory.length === 0 ? (
-                  <div className="text-center py-8 text-gray-400 dark:text-gray-600 text-sm">
+                  <p style={{ textAlign: 'center', color: 'var(--text-3)', fontSize: 13, padding: '24px 10px' }}>
                     No conversations yet
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    {(() => {
-                      const personal = sessionHistory.filter(s => !s.is_shared);
-                      const shared   = sessionHistory.filter(s => s.is_shared);
-                      const renderBtn = (session) => (
-                        <button
-                          key={session.id}
-                          onClick={() => onLoadSession?.(session)}
-                          className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg transition-colors text-left ${
-                            activeSessionId === session.id
-                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100'
-                              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-                          }`}
-                        >
-                          <MessageSquare className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
-                            activeSessionId === session.id ? 'text-blue-500' : session.is_shared ? 'text-teal-400 opacity-70' : 'opacity-40'
-                          }`} />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium truncate">{session.session_name || 'Untitled Chat'}</p>
-                            <p className="text-xs text-gray-400 dark:text-gray-500 truncate mt-0.5">
-                              {session.is_shared ? `Shared · ${session.kb_name || session.folder_name || 'KB'}` : (session.folder_name || 'Drive')}
-                            </p>
-                          </div>
-                        </button>
-                      );
-                      return (
+                  </p>
+                ) : (() => {
+                  const personal = sessionHistory.filter(s => !s.is_shared);
+                  const shared   = sessionHistory.filter(s => s.is_shared);
+
+                  const renderBtn = (s) => {
+                    const isActive = activeSessionId === s.id;
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => onLoadSession?.(s)}
+                        style={{
+                          width: '100%',
+                          display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                          padding: '7px 10px',
+                          borderRadius: 6,
+                          border: 'none',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          background: isActive ? 'var(--bg-3)' : 'transparent',
+                          transition: 'background 0.1s',
+                          marginBottom: 1,
+                        }}
+                        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg-hover)'; }}
+                        onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <span style={{
+                          fontSize: 13,
+                          color: isActive ? 'var(--text-1)' : 'var(--text-2)',
+                          fontWeight: isActive ? 500 : 400,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          maxWidth: '100%', display: 'block',
+                        }}>
+                          {s.session_name || 'Untitled'}
+                        </span>
+                        <span style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>
+                          {s.is_shared ? `Shared · ${s.kb_name || s.folder_name || 'KB'}` : (s.folder_name || 'Drive')}
+                        </span>
+                      </button>
+                    );
+                  };
+
+                  return (
+                    <>
+                      {personal.map(renderBtn)}
+                      {shared.length > 0 && (
                         <>
-                          {personal.map(renderBtn)}
-                          {shared.length > 0 && (
-                            <>
-                              <div className="pt-3 pb-1 px-2">
-                                <p className="text-xs font-semibold text-teal-500 dark:text-teal-400 uppercase tracking-wider">Shared</p>
-                              </div>
-                              {shared.map(renderBtn)}
-                            </>
-                          )}
+                          <div style={{ padding: '10px 10px 4px', borderTop: '1px solid var(--border-sub)', marginTop: 8 }}>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                              Shared
+                            </span>
+                          </div>
+                          {shared.map(renderBtn)}
                         </>
-                      );
-                    })()}
-                  </div>
-                )}
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </>
           )}
 
-          {/* ── ANALYTICS SIDEBAR ── */}
+          {/* ── ANALYTICS sidebar ────────────────────────────────────── */}
           {isAnalytics && (
-            <>
-              <div className="mb-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-10 h-10 bg-gradient-to-tr from-purple-600 to-pink-600 rounded-xl flex items-center justify-center">
-                    <BarChart2 className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white">Analytics</h3>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Performance Insights</p>
-                  </div>
-                </div>
+            <div style={{ padding: '0 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ padding: '0 4px 8px' }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                  Quick overview
+                </span>
               </div>
-
-              {/* FIX: Show real data when available, '--' while loading */}
-              <div className="flex-1 overflow-y-auto">
-                <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3 px-2">
-                  Quick Overview
-                </p>
-                <div className="space-y-3">
-                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 border border-blue-100 dark:border-blue-900">
-                    <div className="flex items-center gap-2 mb-1">
-                      <MessageSquare className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Total Queries</span>
-                    </div>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {analyticsData ? totalQueries : '--'}
-                    </p>
+              {[
+                { icon: MessageSquare, label: 'Queries',      value: analyticsData ? String(totalQueries) : '—',     color: 'var(--accent)' },
+                { icon: TrendingUp,    label: 'Deflection',   value: analyticsData ? `${deflection.toFixed(1)}%` : '—', color: 'var(--success)' },
+                { icon: Clock,         label: 'Avg response', value: analyticsData ? (avgMs >= 1000 ? `${(avgMs / 1000).toFixed(1)}s` : `${Math.round(avgMs)}ms`) : '—', color: 'var(--purple)' },
+              ].map(item => (
+                <div
+                  key={item.label}
+                  style={{
+                    padding: '11px 13px',
+                    background: 'var(--bg-3)',
+                    borderRadius: 7,
+                    border: '1px solid var(--border-sub)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <item.icon size={12} style={{ color: item.color }} />
+                    <span style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>
+                      {item.label}
+                    </span>
                   </div>
-
-                  <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-3 border border-green-100 dark:border-green-900">
-                    <div className="flex items-center gap-2 mb-1">
-                      <TrendingUp className="w-4 h-4 text-green-600 dark:text-green-400" />
-                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Deflection Rate</span>
-                    </div>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {analyticsData ? `${deflection.toFixed(1)}%` : '--'}
-                    </p>
-                  </div>
-
-                  <div className="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-3 border border-purple-100 dark:border-purple-900">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Clock className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Avg Response</span>
-                    </div>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {analyticsData
-                        ? avgResponseMs >= 1000
-                          ? `${(avgResponseMs / 1000).toFixed(1)}s`
-                          : `${Math.round(avgResponseMs)}ms`
-                        : '--'}
-                    </p>
-                  </div>
+                  <span style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-1)', letterSpacing: '-0.025em' }}>
+                    {item.value}
+                  </span>
                 </div>
-
-                <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-                  <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-                    View detailed metrics in the main dashboard →
-                  </p>
-                </div>
-              </div>
-            </>
+              ))}
+            </div>
           )}
         </div>
 
-        {/* Sidebar toggle handle */}
+        {/* Collapse handle */}
         <button
-          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className="absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-r-lg flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-sm z-10"
-          aria-label={isSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+          onClick={() => setOpen(!open)}
+          style={{
+            position: 'absolute', right: -11, top: '50%', transform: 'translateY(-50%)',
+            width: 22, height: 36,
+            background: 'var(--bg-2)',
+            border: '1px solid var(--border)',
+            borderRadius: 5,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', zIndex: 10,
+            transition: 'background 0.1s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-3)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-2)'}
         >
-          {isSidebarOpen ? (
-            <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-          )}
+          {open
+            ? <ChevronLeft size={13} style={{ color: 'var(--text-3)' }} />
+            : <ChevronRight size={13} style={{ color: 'var(--text-3)' }} />
+          }
         </button>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      {/* ── Main content ─────────────────────────────────────────────── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
         <Navbar
           userId={userId}
           displayName={displayName}
           userEmail={userEmail}
           role={role}
           profileLoading={profileLoading}
-          onMenuToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-          showMenuButton={!isSidebarOpen}
+          onMenuToggle={() => setOpen(!open)}
+          showMenuButton={!open}
         />
-        <div className="flex-1 overflow-hidden">
+        <div style={{ flex: 1, overflow: 'hidden' }}>
           {children}
         </div>
       </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

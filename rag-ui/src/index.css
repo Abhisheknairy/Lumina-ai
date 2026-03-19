@@ -2,11 +2,130 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+/* ═══════════════════════════════════════════════
+   LIGHT (Notion warm white — default)
+═══════════════════════════════════════════════ */
+:root {
+  --bg:           #fafaf8;
+  --bg-2:         #ffffff;
+  --bg-3:         #f4f3f0;
+  --bg-4:         #eceae6;
+  --bg-hover:     #f0efec;
+
+  --border:       #e8e6e1;
+  --border-sub:   #f0efec;
+
+  --text-1:       #1a1a18;
+  --text-2:       #6b6b63;
+  --text-3:       #a8a89e;
+
+  --accent:       #2f6fef;
+  --accent-h:     #1a5bd4;
+  --accent-dim:   rgba(47,111,239,0.08);
+  --accent-border:rgba(47,111,239,0.2);
+
+  --success:      #1a7a44;
+  --success-dim:  rgba(26,122,68,0.07);
+  --success-bdr:  rgba(26,122,68,0.2);
+
+  --warn:         #9a6500;
+  --warn-dim:     rgba(154,101,0,0.07);
+  --warn-bdr:     rgba(154,101,0,0.2);
+
+  --danger:       #c0392b;
+  --danger-dim:   rgba(192,57,43,0.07);
+  --danger-bdr:   rgba(192,57,43,0.2);
+
+  --teal:         #0f766e;
+  --teal-dim:     rgba(15,118,110,0.07);
+  --teal-border:  rgba(15,118,110,0.2);
+
+  --purple:       #6d28d9;
+
+  --shadow-sm:    0 1px 2px rgba(0,0,0,0.05);
+  --shadow:       0 1px 4px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04);
+  --shadow-md:    0 4px 16px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04);
+}
+
+/* ═══════════════════════════════════════════════
+   DARK (Notion dark — warm tones, not cold)
+═══════════════════════════════════════════════ */
+html.dark {
+  --bg:           #191919;
+  --bg-2:         #202020;
+  --bg-3:         #282828;
+  --bg-4:         #2f2f2f;
+  --bg-hover:     #2a2a2a;
+
+  --border:       #383838;
+  --border-sub:   #2d2d2d;
+
+  --text-1:       #efefef;
+  --text-2:       #9b9b8f;
+  --text-3:       #555550;
+
+  --accent:       #4a7ff0;
+  --accent-h:     #6090f4;
+  --accent-dim:   rgba(74,127,240,0.12);
+  --accent-border:rgba(74,127,240,0.25);
+
+  --success:      #3db867;
+  --success-dim:  rgba(61,184,103,0.1);
+  --success-bdr:  rgba(61,184,103,0.25);
+
+  --warn:         #e09f3e;
+  --warn-dim:     rgba(224,159,62,0.1);
+  --warn-bdr:     rgba(224,159,62,0.25);
+
+  --danger:       #e05c5c;
+  --danger-dim:   rgba(224,92,92,0.1);
+  --danger-bdr:   rgba(224,92,92,0.25);
+
+  --teal:         #2dd4bf;
+  --teal-dim:     rgba(45,212,191,0.1);
+  --teal-border:  rgba(45,212,191,0.25);
+
+  --purple:       #a78bfa;
+
+  --shadow-sm:    0 1px 2px rgba(0,0,0,0.3);
+  --shadow:       0 1px 4px rgba(0,0,0,0.35), 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-md:    0 4px 20px rgba(0,0,0,0.5), 0 1px 4px rgba(0,0,0,0.3);
+}
+
+/* ═══════════════════════════════════════════════
+   BASE
+═══════════════════════════════════════════════ */
+* { box-sizing: border-box; }
+html { height: 100%; }
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background 0.2s, color 0.2s;
 }
+
+#root { height: 100%; }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+::selection { background: var(--accent-dim); }
+* { outline: none; }
+
+/* animations */
+@keyframes spin   { to { transform: rotate(360deg); } }
+@keyframes blink  { 0%,100%{opacity:1} 50%{opacity:0} }
+@keyframes dotpulse { 0%,100%{opacity:0.3;transform:scale(0.75)} 50%{opacity:1;transform:scale(1)} }
+@keyframes fadein { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
