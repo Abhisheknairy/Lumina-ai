@@ -4,9 +4,10 @@ import {
   MessageSquare, BarChart2, Users, ShieldCheck,
   Plus, LogOut, Menu,
   Moon, Sun, ChevronDown, TrendingUp, Clock,
-  Database, MessageCircle, Trash2
+  Database, MessageCircle, Trash2, Cog
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import Settings from './Settings';
 
 const SUPER_ADMIN_EMAILS = ['n.abhishek@isteer.com', 'debasis.sahoo@isteer.com'];
 const SIDEBAR_W = 240;
@@ -37,8 +38,9 @@ export default function AppLayout({
   const location  = useLocation();
   const { isDark, toggleTheme } = useTheme();
   
-  const [open,        setOpen]        = useState(true);
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [open,         setOpen]         = useState(true);
+  const [profileOpen,  setProfileOpen]  = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const path         = location.pathname;
   const isChat       = path === '/chat';
@@ -256,8 +258,11 @@ export default function AppLayout({
         </div>
 
         {/* ── User bottom ── */}
-        <div style={{ flexShrink: 0, padding: open ? '8px' : '8px 0', borderTop: '1px solid var(--border-sub)', display: 'flex', justifyContent: 'center' }}>
-          <div style={{ position: 'relative', width: open ? '100%' : 'auto' }}>
+        <div style={{ flexShrink: 0, padding: open ? '8px' : '8px 0', borderTop: '1px solid var(--border-sub)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+
+          {/* Settings gear — always visible */}
+          
+          <div style={{ position: 'relative', flex: open ? 1 : 'unset' }}>
             <button onClick={() => setProfileOpen(!profileOpen)}
               title={!open ? name : undefined}
               style={{ 
@@ -290,6 +295,13 @@ export default function AppLayout({
                     <p style={{ fontSize: 10, color: 'var(--text-3)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-body)' }}>{userEmail}</p>
                     {isSA && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: 10, color: 'var(--purple)', background: 'rgba(167,139,250,0.1)', padding: '2px 7px', borderRadius: 4, fontFamily: 'var(--font-body)' }}><ShieldCheck size={9} />Super Admin</span>}
                   </div>
+                  <button onClick={() => { setProfileOpen(false); setSettingsOpen(true); }}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-2)', fontFamily: 'var(--font-body)', transition: 'background 0.1s' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; }}>
+                    <Cog size={13} /> Settings
+                  </button>
+                  <div style={{ height: 1, background: 'var(--border-sub)', margin: '0 10px' }} />
                   <button onClick={() => { setProfileOpen(false); navigate('/'); }}
                     style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--danger)', fontFamily: 'var(--font-body)', transition: 'background 0.1s' }}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--danger-dim)'}
@@ -312,22 +324,41 @@ export default function AppLayout({
             <span style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 500, color: 'var(--text-2)', fontStyle: 'italic' }}>{pageLabel}</span>
           </div>
           
-          {/* Theme toggle permanently in the top right */}
-          <button
-            onClick={toggleTheme}
-            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, borderRadius: 6, color: 'var(--text-3)', display: 'flex', transition: 'all 0.15s' }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-3)'; }}
-          >
-            {isDark ? <Sun size={17} /> : <Moon size={17} />}
-          </button>
+          {/* Theme toggle + Settings in the top right */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              title="Settings"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, borderRadius: 6, color: 'var(--text-3)', display: 'flex', transition: 'all 0.15s' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-3)'; }}
+            >
+              <Cog size={17} />
+            </button>
+            <button
+              onClick={toggleTheme}
+              title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, borderRadius: 6, color: 'var(--text-3)', display: 'flex', transition: 'all 0.15s' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-3)'; }}
+            >
+              {isDark ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+          </div>
         </div>
 
         <div style={{ flex: 1, overflow: 'hidden' }}>{children}</div>
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      <Settings
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        displayName={displayName}
+        userEmail={userEmail}
+        role={role}
+      />
     </div>
   );
 }
