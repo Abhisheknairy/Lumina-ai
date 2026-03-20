@@ -1,14 +1,57 @@
-/* ── IMPORTANT: @import must be FIRST — before @tailwind directives ── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+/* ── IMPORTANT: @import must be FIRST ── */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=DM+Sans:wght@300;400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* ═══════════════════════════════════════════════
-   LIGHT — Notion warm white (default)
+   DARK LUXURY — primary theme (matches Landing/Login)
 ═══════════════════════════════════════════════ */
 :root {
+  --bg:            #0b0b0d;
+  --bg-2:          #111113;
+  --bg-3:          #1a1a1e;
+  --bg-4:          #222228;
+  --bg-hover:      #16161a;
+  --border:        rgba(255,255,255,0.09);
+  --border-sub:    rgba(255,255,255,0.05);
+  --text-1:        #f0ede8;
+  --text-2:        rgba(240,237,232,0.55);
+  --text-3:        rgba(240,237,232,0.28);
+  --accent:        #c8a96e;
+  --accent-h:      #dabb82;
+  --accent-dim:    rgba(200,169,110,0.10);
+  --accent-border: rgba(200,169,110,0.25);
+  --success:       #4ade80;
+  --success-dim:   rgba(74,222,128,0.08);
+  --success-bdr:   rgba(74,222,128,0.2);
+  --warn:          #fbbf24;
+  --warn-dim:      rgba(251,191,36,0.08);
+  --warn-bdr:      rgba(251,191,36,0.2);
+  --danger:        #f87171;
+  --danger-dim:    rgba(248,113,113,0.08);
+  --danger-bdr:    rgba(248,113,113,0.2);
+  --teal:          #2dd4bf;
+  --teal-dim:      rgba(45,212,191,0.08);
+  --teal-border:   rgba(45,212,191,0.2);
+  --purple:        #a78bfa;
+  --shadow-sm:     0 1px 3px rgba(0,0,0,0.5);
+  --shadow:        0 2px 8px rgba(0,0,0,0.6), 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md:     0 8px 32px rgba(0,0,0,0.7), 0 2px 8px rgba(0,0,0,0.5);
+  --gold:          #c8a96e;
+  --gold-h:        #dabb82;
+  --gold-dim:      rgba(200,169,110,0.10);
+  --gold-border:   rgba(200,169,110,0.25);
+
+  --font-display:  'Playfair Display', Georgia, serif;
+  --font-body:     'DM Sans', -apple-system, sans-serif;
+}
+
+/* ═══════════════════════════════════════════════
+   LIGHT variant (toggled via html.light)
+═══════════════════════════════════════════════ */
+html.light {
   --bg:            #fafaf8;
   --bg-2:          #ffffff;
   --bg-3:          #f4f3f0;
@@ -19,10 +62,10 @@
   --text-1:        #1a1a18;
   --text-2:        #6b6b63;
   --text-3:        #a8a89e;
-  --accent:        #2f6fef;
-  --accent-h:      #1a5bd4;
-  --accent-dim:    rgba(47,111,239,0.08);
-  --accent-border: rgba(47,111,239,0.2);
+  --accent:        #a07840;
+  --accent-h:      #8a6430;
+  --accent-dim:    rgba(160,120,64,0.08);
+  --accent-border: rgba(160,120,64,0.2);
   --success:       #1a7a44;
   --success-dim:   rgba(26,122,68,0.07);
   --success-bdr:   rgba(26,122,68,0.2);
@@ -39,74 +82,140 @@
   --shadow-sm:     0 1px 2px rgba(0,0,0,0.05);
   --shadow:        0 1px 4px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04);
   --shadow-md:     0 4px 16px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04);
-}
-
-/* ═══════════════════════════════════════════════
-   DARK — Notion warm dark
-═══════════════════════════════════════════════ */
-html.dark {
-  --bg:            #191919;
-  --bg-2:          #202020;
-  --bg-3:          #282828;
-  --bg-4:          #2f2f2f;
-  --bg-hover:      #2a2a2a;
-  --border:        #383838;
-  --border-sub:    #2d2d2d;
-  --text-1:        #efefef;
-  --text-2:        #9b9b8f;
-  --text-3:        #555550;
-  --accent:        #4a7ff0;
-  --accent-h:      #6090f4;
-  --accent-dim:    rgba(74,127,240,0.12);
-  --accent-border: rgba(74,127,240,0.25);
-  --success:       #3db867;
-  --success-dim:   rgba(61,184,103,0.1);
-  --success-bdr:   rgba(61,184,103,0.25);
-  --warn:          #e09f3e;
-  --warn-dim:      rgba(224,159,62,0.1);
-  --warn-bdr:      rgba(224,159,62,0.25);
-  --danger:        #e05c5c;
-  --danger-dim:    rgba(224,92,92,0.1);
-  --danger-bdr:    rgba(224,92,92,0.25);
-  --teal:          #2dd4bf;
-  --teal-dim:      rgba(45,212,191,0.1);
-  --teal-border:   rgba(45,212,191,0.25);
-  --purple:        #a78bfa;
-  --shadow-sm:     0 1px 2px rgba(0,0,0,0.3);
-  --shadow:        0 1px 4px rgba(0,0,0,0.35), 0 4px 12px rgba(0,0,0,0.25);
-  --shadow-md:     0 4px 20px rgba(0,0,0,0.5), 0 1px 4px rgba(0,0,0,0.3);
+  --gold:          #a07840;
+  --gold-h:        #8a6430;
+  --gold-dim:      rgba(160,120,64,0.08);
+  --gold-border:   rgba(160,120,64,0.2);
 }
 
 /* ═══════════════════════════════════════════════
    BASE
 ═══════════════════════════════════════════════ */
-* { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
 html { height: 100%; }
 
 body {
-  margin: 0;
-  height: 100%;
+  margin: 0; height: 100%;
   background: var(--bg);
   color: var(--text-1);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  transition: background 0.2s, color 0.2s;
+  transition: background 0.25s, color 0.25s;
 }
 
 #root { height: 100%; }
 
-::-webkit-scrollbar { width: 5px; height: 5px; }
+/* Scrollbars */
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
-
-::selection { background: var(--accent-dim); }
+::-webkit-scrollbar-thumb { background: rgba(200,169,110,0.2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(200,169,110,0.4); }
 * { outline: none; }
+::selection { background: rgba(200,169,110,0.2); }
 
-@keyframes spin     { to { transform: rotate(360deg); } }
-@keyframes blink    { 0%,100%{opacity:1} 50%{opacity:0} }
-@keyframes dotpulse { 0%,100%{opacity:0.3;transform:scale(0.75)} 50%{opacity:1;transform:scale(1)} }
-@keyframes fadein   { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
+/* ═══════════════════════════════════════════════
+   GLOBAL ANIMATIONS
+═══════════════════════════════════════════════ */
+@keyframes spin      { to { transform: rotate(360deg); } }
+@keyframes blink     { 0%,100%{opacity:1} 50%{opacity:0} }
+@keyframes dotpulse  { 0%,100%{opacity:0.3;transform:scale(0.75)} 50%{opacity:1;transform:scale(1)} }
+@keyframes fadein    { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+@keyframes shimmer   { 0%{background-position:-200% center} 100%{background-position:200% center} }
+@keyframes grain     {
+  0%,100%{transform:translate(0,0)} 10%{transform:translate(-2%,-3%)}
+  20%{transform:translate(3%,2%)} 30%{transform:translate(-1%,4%)}
+  40%{transform:translate(4%,-1%)} 50%{transform:translate(-3%,1%)}
+  60%{transform:translate(1%,-4%)} 70%{transform:translate(-4%,2%)}
+  80%{transform:translate(2%,3%)} 90%{transform:translate(-1%,-2%)}
+}
+@keyframes float     { from{transform:translateY(0)} to{transform:translateY(-10px)} }
+@keyframes glow-pulse { 0%,100%{opacity:0.5} 50%{opacity:1} }
+
+/* ═══════════════════════════════════════════════
+   GRAIN OVERLAY — applied globally to app pages
+═══════════════════════════════════════════════ */
+.grain-overlay {
+  position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+  opacity: 0.028;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 200px;
+  animation: grain 0.5s steps(1) infinite;
+}
+
+/* ═══════════════════════════════════════════════
+   SHARED COMPONENT TOKENS
+═══════════════════════════════════════════════ */
+
+/* Gold CTA button */
+.btn-gold {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--gold); color: #0b0b0d;
+  border: none; border-radius: 7px;
+  padding: 10px 20px; font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: var(--font-body);
+  transition: all 0.2s; position: relative; overflow: hidden;
+  letter-spacing: 0.01em;
+}
+.btn-gold::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+  transform: translateX(-100%); transition: transform 0.5s;
+}
+.btn-gold:hover { background: var(--gold-h); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(200,169,110,0.3); }
+.btn-gold:hover::after { transform: translateX(100%); }
+.btn-gold:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+/* Ghost button */
+.btn-ghost {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: transparent; color: var(--text-2);
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 9px 16px; font-size: 13px; font-weight: 500;
+  cursor: pointer; font-family: var(--font-body); transition: all 0.2s;
+}
+.btn-ghost:hover { border-color: var(--gold-border); color: var(--gold); background: var(--gold-dim); }
+
+/* Icon button */
+.btn-icon {
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  padding: 7px; cursor: pointer; color: var(--text-3);
+  transition: all 0.15s;
+}
+.btn-icon:hover { background: var(--bg-3); color: var(--text-1); border-color: var(--accent-border); }
+
+/* Input */
+.lux-input {
+  width: 100%; background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: 7px; padding: 9px 12px;
+  color: var(--text-1); font-size: 13px; font-family: var(--font-body);
+  transition: border-color 0.15s, background 0.15s;
+}
+.lux-input::placeholder { color: var(--text-3); }
+.lux-input:focus { border-color: var(--gold-border); background: rgba(200,169,110,0.04); outline: none; }
+
+/* Card */
+.lux-card {
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px 22px;
+  box-shadow: var(--shadow-sm); transition: box-shadow 0.2s, border-color 0.2s;
+}
+.lux-card:hover { box-shadow: var(--shadow); border-color: var(--accent-border); }
+
+/* Gold divider line */
+.gold-line { width: 36px; height: 1px; background: var(--gold); flex-shrink: 0; }
+
+/* Section label */
+.section-label {
+  font-family: var(--font-body); font-size: 10px; font-weight: 600;
+  color: var(--gold); letter-spacing: 0.1em; text-transform: uppercase;
+}
+
+/* Page title (Playfair) */
+.page-title {
+  font-family: var(--font-display); font-size: 22px; font-weight: 600;
+  color: var(--text-1); letter-spacing: -0.025em;
+}

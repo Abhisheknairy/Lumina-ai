@@ -1,6 +1,7 @@
-import { BrowserRouter as Router, Routes, Route, useSearchParams, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import { useEffect } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
+import Landing       from './pages/Landing';
 import Login         from './pages/Login';
 import Chat          from './pages/Chat';
 import OAuthCallback from './pages/OAuthCallback';
@@ -34,19 +35,18 @@ function KBJoinRedirect() {
   );
 }
 
-// Import useParams — needed for KBJoinRedirect
-import { useParams } from 'react-router-dom';
 
 function App() {
   return (
     <ThemeProvider>
       <Router>
         <Routes>
-          <Route path="/"              element={<Login />}         />
-          <Route path="/callback"      element={<OAuthCallback />} />
-          <Route path="/chat"          element={<Chat />}          />
-          <Route path="/analytics"     element={<Analytics />}     />
-          <Route path="/admin"         element={<SuperAdmin />}    />
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/callback" element={<OAuthCallback />} />
+          <Route path="/chat" element={<Chat />} />
+          <Route path="/analytics" element={<Analytics />} />
+          <Route path="/admin" element={<SuperAdmin />} />
           <Route path="/collaboration" element={<Collaboration />} />
           {/* FIX: KB invite link handler */}
           <Route path="/kb/join/:token" element={<KBJoinRedirect />} />

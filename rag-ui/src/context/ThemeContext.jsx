@@ -4,18 +4,18 @@ const ThemeContext = createContext();
 
 export function ThemeProvider({ children }) {
   const [isDark, setIsDark] = useState(() => {
-    // FIX: Removed all console.log debug statements
     const saved = localStorage.getItem('theme');
-    return saved === 'dark';
+    // Default to dark (matches the luxury brand)
+    return saved !== 'light';
   });
 
   useEffect(() => {
     const root = document.documentElement;
     if (isDark) {
-      root.classList.add('dark');
+      root.classList.remove('light');
       localStorage.setItem('theme', 'dark');
     } else {
-      root.classList.remove('dark');
+      root.classList.add('light');
       localStorage.setItem('theme', 'light');
     }
   }, [isDark]);
@@ -30,9 +30,7 @@ export function ThemeProvider({ children }) {
 }
 
 export function useTheme() {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error('useTheme must be used within ThemeProvider');
-  }
-  return context;
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error('useTheme must be used within ThemeProvider');
+  return ctx;
 }
