@@ -29,7 +29,7 @@ function getInitials(name, email) {
   return words[0][0].toUpperCase();
 }
 
-const SUPER_ADMIN_EMAIL = 'n.abhishek@isteer.com';
+const SUPER_ADMIN_EMAILS = ['n.abhishek@isteer.com', 'debasis.sahoo@isteer.com'];
 
 export default function Navbar({
   userId, displayName, userEmail, role,
@@ -44,7 +44,7 @@ export default function Navbar({
   const safeName     = safeDisplayName(displayName);
   const resolvedName = safeName || nameFromEmail(userEmail);
   const initials     = profileLoading ? '·' : getInitials(displayName, userEmail);
-  const isSuperAdmin   = role === 'super_admin' || userEmail === SUPER_ADMIN_EMAIL;
+  const isSuperAdmin   = role === 'super_admin' || SUPER_ADMIN_EMAILS.includes(userEmail);
   const isAdminOrAbove = role === 'super_admin' || role === 'admin';
 
   const tabs = [

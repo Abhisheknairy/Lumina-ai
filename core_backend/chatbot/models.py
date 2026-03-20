@@ -1,7 +1,10 @@
 from django.db import models
 
 # ── Role constants ─────────────────────────────────────────────────────
-SUPER_ADMIN_EMAIL = "n.abhishek@isteer.com"
+SUPER_ADMIN_EMAILS = [
+    "n.abhishek@isteer.com",
+    "debasis.sahoo@isteer.com", # Add your second super admin here!
+]
 
 ROLE_SUPER_ADMIN = "super_admin"
 ROLE_ADMIN       = "admin"
