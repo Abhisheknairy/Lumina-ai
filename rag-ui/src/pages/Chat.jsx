@@ -69,27 +69,185 @@ function inlineFmt(text) {
   return parts.length ? parts : text;
 }
 
-// ── Ticket button ─────────────────────────────────────────────────────
-function TicketBtn({ message, userId }) {
-  const [state, setState] = useState('idle');
-  const raise = async () => {
-    if (!message.interaction_id) return;
+// ── Ticket comment modal ──────────────────────────────────────────────
+function TicketModal({ message, userId, onClose }) {
+  const [comment, setComment] = useState('');
+  const [state,   setState]   = useState('idle'); // idle | loading | success | error
+  const textRef = useRef(null);
+
+  useEffect(() => { setTimeout(() => textRef.current?.focus(), 80); }, []);
+
+  const submit = async () => {
     setState('loading');
     try {
-      const res = await authFetch(userId, `/api/raise-ticket/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interaction_id: message.interaction_id, user_query: '', ai_response: message.content, priority: 'medium' }) });
+      const res = await authFetch(userId, `/api/raise-ticket/${userId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          interaction_id: message.interaction_id,
+          user_query: '',
+          ai_response: message.content,
+          priority: 'medium',
+          comment,
+        }),
+      });
       if (!res.ok) throw new Error();
       setState('success');
-    } catch { setState('error'); setTimeout(() => setState('idle'), 3000); }
+      setTimeout(onClose, 1400);
+    } catch {
+      setState('error');
+      setTimeout(() => setState('idle'), 3000);
+    }
   };
-  if (!message.interaction_id) return null;
-  if (state === 'success') return <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 10, padding: '4px 10px', background: 'var(--success-dim)', border: '1px solid var(--success-bdr)', borderRadius: 5, fontSize: 11, color: 'var(--success)' }}><CheckCircle size={11} /> Ticket raised</div>;
+
   return (
-    <button onClick={raise} disabled={state === 'loading'}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 10, padding: '4px 10px', background: 'none', border: '1px solid var(--border)', borderRadius: 5, fontSize: 11, color: 'var(--text-3)', cursor: 'pointer', transition: 'all 0.1s', fontFamily: 'var(--font-body)' }}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--warn-bdr)'; e.currentTarget.style.color = 'var(--warn)'; e.currentTarget.style.background = 'var(--warn-dim)'; }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-3)'; e.currentTarget.style.background = 'none'; }}>
-      {state === 'loading' ? <><Loader2 size={11} style={{ animation: 'spin 0.7s linear infinite' }} />Raising…</> : <><TicketCheck size={11} />Raise ticket</>}
-    </button>
+    <>
+      {/* Backdrop */}
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)' }} />
+
+      {/* Modal */}
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', zIndex: 1001,
+        transform: 'translate(-50%, -50%)',
+        width: 420, maxWidth: '92vw',
+        background: 'var(--bg-2)',
+        border: '1px solid var(--border)',
+        borderRadius: 14,
+        boxShadow: '0 24px 64px rgba(0,0,0,0.4)',
+        overflow: 'hidden',
+        animation: 'modalIn 0.18s cubic-bezier(.4,0,.2,1)',
+      }}>
+        {/* Header */}
+        <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid var(--border-sub)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(200,169,110,0.12)', border: '1px solid var(--gold-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <TicketCheck size={15} style={{ color: 'var(--gold)' }} />
+            </div>
+            <div>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--text-1)', fontFamily: 'var(--font-display)' }}>Raise a Ticket</p>
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-body)' }}>Add a comment before submitting</p>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4, borderRadius: 6, display: 'flex', flexShrink: 0 }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-2)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-3)'; }}>
+            <X size={15} />
+          </button>
+        </div>
+
+        {/* AI response preview */}
+        <div style={{ margin: '14px 20px 0', padding: '10px 12px', background: 'var(--bg-3)', border: '1px solid var(--border-sub)', borderRadius: 8, maxHeight: 80, overflow: 'hidden', position: 'relative' }}>
+          <p style={{ margin: 0, fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-body)', lineHeight: 1.6, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {message.content}
+          </p>
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 24, background: 'linear-gradient(transparent, var(--bg-3))' }} />
+        </div>
+
+        {/* Comment box */}
+        <div style={{ padding: '14px 20px' }}>
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: 7, fontFamily: 'var(--font-body)' }}>
+            Comment
+          </label>
+          <textarea
+            ref={textRef}
+            value={comment}
+            onChange={e => setComment(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(); }}
+            placeholder="Describe the issue, expected behaviour, or any additional context…"
+            rows={4}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              padding: '10px 12px',
+              background: 'var(--bg-3)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              color: 'var(--text-1)',
+              fontSize: 13, fontFamily: 'var(--font-body)',
+              lineHeight: 1.65, resize: 'vertical',
+              outline: 'none', transition: 'border-color 0.15s',
+            }}
+            onFocus={e => e.target.style.borderColor = 'var(--gold)'}
+            onBlur={e => e.target.style.borderColor = 'var(--border)'}
+          />
+          <p style={{ margin: '5px 0 0', fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-body)' }}>⌘ Enter to submit</p>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '0 20px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          {state === 'error' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--danger)', fontFamily: 'var(--font-body)' }}>
+              <AlertCircle size={13} /> Failed to raise ticket
+            </div>
+          )}
+          {state === 'success' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#4ade80', fontFamily: 'var(--font-body)' }}>
+              <CheckCircle size={13} /> Ticket raised!
+            </div>
+          )}
+          {(state === 'idle' || state === 'loading') && <span />}
+
+          <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+            <button onClick={onClose}
+              style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid var(--border)', background: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-2)', fontFamily: 'var(--font-body)', transition: 'all 0.1s' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; }}>
+              Cancel
+            </button>
+            <button onClick={submit} disabled={state === 'loading' || state === 'success'}
+              style={{
+                padding: '8px 20px', borderRadius: 7, border: 'none',
+                background: state === 'success' ? 'rgba(74,222,128,0.15)' : 'var(--gold)',
+                cursor: state === 'loading' || state === 'success' ? 'not-allowed' : 'pointer',
+                fontSize: 13, fontWeight: 500,
+                color: state === 'success' ? '#4ade80' : '#0b0b0d',
+                fontFamily: 'var(--font-body)',
+                display: 'flex', alignItems: 'center', gap: 7,
+                transition: 'all 0.15s', opacity: state === 'loading' ? 0.7 : 1,
+              }}>
+              {state === 'loading'
+                ? <><Loader2 size={13} style={{ animation: 'spin 0.7s linear infinite' }} /> Raising…</>
+                : state === 'success'
+                  ? <><CheckCircle size={13} /> Raised!</>
+                  : <><TicketCheck size={13} /> Raise Ticket</>}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <style>{`@keyframes modalIn { from { opacity:0; transform:translate(-50%,-48%) scale(0.97); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }`}</style>
+    </>
+  );
+}
+
+// ── Ticket button ─────────────────────────────────────────────────────
+function TicketBtn({ message, userId }) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [raised,    setRaised]    = useState(false);
+
+  if (!message.interaction_id) return null;
+
+  if (raised) return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 10, padding: '4px 10px', background: 'var(--success-dim)', border: '1px solid var(--success-bdr)', borderRadius: 5, fontSize: 11, color: 'var(--success)' }}>
+      <CheckCircle size={11} /> Ticket raised
+    </div>
+  );
+
+  return (
+    <>
+      <button onClick={() => setModalOpen(true)}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 10, padding: '4px 10px', background: 'none', border: '1px solid var(--border)', borderRadius: 5, fontSize: 11, color: 'var(--text-3)', cursor: 'pointer', transition: 'all 0.1s', fontFamily: 'var(--font-body)' }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold-border)'; e.currentTarget.style.color = 'var(--gold)'; e.currentTarget.style.background = 'var(--gold-dim)'; }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-3)'; e.currentTarget.style.background = 'none'; }}>
+        <TicketCheck size={11} /> Raise ticket
+      </button>
+      {modalOpen && (
+        <TicketModal
+          message={message}
+          userId={userId}
+          onClose={() => { setModalOpen(false); setRaised(true); }}
+        />
+      )}
+    </>
   );
 }
 

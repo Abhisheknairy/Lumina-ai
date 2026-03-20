@@ -596,6 +596,7 @@ class TicketRequest(Schema):
     user_query:     str
     ai_response:    str
     priority:       str = "medium"
+    comment:        str = ""        # Optional user comment attached to the ticket
 
 
 class CreateKBRequest(Schema):
@@ -1126,7 +1127,10 @@ def raise_ticket(request, user_id: str, payload: TicketRequest):
         return api.create_response(request, {"detail": "Forbidden"}, status=403)
     try:
         if payload.interaction_id is not None:
-            InteractionLog.objects.filter(id=payload.interaction_id).update(ticket_raised=True)
+            InteractionLog.objects.filter(id=payload.interaction_id).update(
+                ticket_raised=True,
+                ticket_comment=payload.comment.strip(),
+            )
         return {"success": True, "interaction_id": payload.interaction_id}
     except Exception as e:
         return api.create_response(request, {"detail": str(e)}, status=500)
