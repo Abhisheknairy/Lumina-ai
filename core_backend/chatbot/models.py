@@ -40,32 +40,47 @@ class OAuthSession(models.Model):
     def __str__(self):
         return f"OAuthSession({self.user_id})"
 
+class PlatformRole(models.Model):
+    """
+    Dynamic RBAC Role. 
+    Permissions are stored as a JSON dictionary of boolean toggles.
+    """
+    name = models.CharField(max_length=50, unique=True)
+    description = models.CharField(max_length=255, blank=True, default="")
+    is_system = models.BooleanField(default=False, help_text="System roles cannot be deleted")
+    permissions = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
 
 class UserProfile(models.Model):
     """
-    Google OAuth profile + platform role.
-    Role auto-assigned on first login:
-      - super_admin if email == SUPER_ADMIN_EMAIL
-      - user otherwise (can be promoted to admin by super_admin)
+    Google OAuth profile + dynamic platform role.
     """
     user_id      = models.CharField(max_length=255, unique=True)
     display_name = models.CharField(max_length=255, blank=True, default="")
     email        = models.EmailField(blank=True, default="")
     avatar_url   = models.URLField(blank=True, null=True)
+    
+    # OLD hardcoded role (we will deprecate this later)
     role         = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_USER)
+    
+    # NEW Dynamic RBAC Role
+    platform_role = models.ForeignKey(
+        PlatformRole, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name="users"
+    )
+    
     created_at   = models.DateTimeField(auto_now_add=True)
     last_seen    = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.display_name} ({self.role})"
-
-    @property
-    def is_super_admin(self):
-        return self.role == ROLE_SUPER_ADMIN
-
-    @property
-    def is_admin_or_above(self):
-        return self.role in (ROLE_SUPER_ADMIN, ROLE_ADMIN)
+        role_name = self.platform_role.name if self.platform_role else self.role
+        return f"{self.display_name} ({role_name})"
 
 
 class KnowledgeBase(models.Model):

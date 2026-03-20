@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare, BarChart2, Users, ShieldCheck,
@@ -40,17 +40,31 @@ export default function AppLayout({
   const [open,        setOpen]        = useState(true);
   const [profileOpen, setProfileOpen] = useState(false);
 
+  // --- ANTI-FLICKER CACHE ---
+  useEffect(() => {
+    if (userEmail) sessionStorage.setItem('lumina_email', userEmail);
+    if (displayName) sessionStorage.setItem('lumina_name', displayName);
+    if (role && role !== 'user') sessionStorage.setItem('lumina_role', role);
+  }, [userEmail, displayName, role]);
+
+  const cachedEmail = userEmail || sessionStorage.getItem('lumina_email') || '';
+  const cachedName  = displayName || sessionStorage.getItem('lumina_name') || '';
+  const effectiveRole = (role && role !== 'user') ? role : (sessionStorage.getItem('lumina_role') || 'user');
+  // --------------------------
+
   const path         = location.pathname;
   const isChat       = path === '/chat';
   const isAnalytics  = path === '/analytics';
   const isCollab     = path === '/collaboration';
   const isAdmin      = path === '/admin';
 
-  const isSA  = role === 'super_admin' || SUPER_ADMIN_EMAILS.includes(userEmail);
-  const isAdm = role === 'super_admin' || role === 'admin';
-  const name  = resolved(displayName, userEmail);
-  const ini   = profileLoading ? '·' : initials(displayName, userEmail);
-  const hue   = nameHue(name || userEmail || 'L');
+  const normalizedRole = String(effectiveRole).toLowerCase().replace(' ', '_');
+  const isSA  = normalizedRole === 'super_admin' || SUPER_ADMIN_EMAILS.includes(cachedEmail);
+  const isAdm = normalizedRole === 'super_admin' || normalizedRole === 'admin';
+  
+  const name  = resolved(cachedName, cachedEmail);
+  const ini   = (profileLoading && !cachedName && !cachedEmail) ? '·' : initials(cachedName, cachedEmail);
+  const hue   = nameHue(name || cachedEmail || 'L');
 
   const NAV = [
     { id: 'chat',  label: 'Chat',          icon: MessageSquare, href: `/chat?user_id=${userId}`,          active: isChat },
@@ -290,7 +304,13 @@ export default function AppLayout({
                     <p style={{ fontSize: 10, color: 'var(--text-3)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-body)' }}>{userEmail}</p>
                     {isSA && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: 10, color: 'var(--purple)', background: 'rgba(167,139,250,0.1)', padding: '2px 7px', borderRadius: 4, fontFamily: 'var(--font-body)' }}><ShieldCheck size={9} />Super Admin</span>}
                   </div>
-                  <button onClick={() => { setProfileOpen(false); navigate('/'); }}
+                  <button onClick={() => { 
+                    sessionStorage.removeItem('lumina_role');
+                    sessionStorage.removeItem('lumina_email');
+                    sessionStorage.removeItem('lumina_name');
+                    setProfileOpen(false); 
+                    navigate('/'); 
+                  }}
                     style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--danger)', fontFamily: 'var(--font-body)', transition: 'background 0.1s' }}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--danger-dim)'}
                     onMouseLeave={e => e.currentTarget.style.background = 'none'}>

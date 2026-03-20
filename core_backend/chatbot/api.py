@@ -31,9 +31,9 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from .models import (
     ChatSession, InteractionLog, SourceDocument,
-    UserProfile, OAuthSession,
+    UserProfile, OAuthSession, PlatformRole, # <--- Added PlatformRole
     KnowledgeBase, KBMembership, AdminAuditLog,
-    SUPER_ADMIN_EMAILS, ROLE_SUPER_ADMIN, ROLE_ADMIN, ROLE_USER, # <--- Updated to EMAILS
+    SUPER_ADMIN_EMAILS, ROLE_SUPER_ADMIN, ROLE_ADMIN, ROLE_USER,
     KB_ROLE_VIEWER, KB_ROLE_EDITOR,
 )
 
@@ -482,19 +482,17 @@ def derive_name_from_email(email: str) -> str:
     return " ".join(p.capitalize() for p in parts if p)
 
 
-def get_user_role(user_id: str) -> str:
+def has_permission(user_id: str, perm_name: str) -> bool:
+    """Checks if the user's dynamic PlatformRole has the requested permission."""
     try:
-        return UserProfile.objects.get(user_id=user_id).role
+        profile = UserProfile.objects.select_related('platform_role').get(user_id=user_id)
+        # If they don't have a platform role yet, default to False
+        if not profile.platform_role:
+            return False
+        # Check the JSON dictionary for the specific toggle
+        return profile.platform_role.permissions.get(perm_name, False)
     except UserProfile.DoesNotExist:
-        return ROLE_USER
-
-
-def require_admin(user_id: str) -> bool:
-    return get_user_role(user_id) in (ROLE_SUPER_ADMIN, ROLE_ADMIN)
-
-
-def require_super_admin(user_id: str) -> bool:
-    return get_user_role(user_id) == ROLE_SUPER_ADMIN
+        return False
 
 
 def audit(
@@ -610,8 +608,12 @@ class CreateKBRequest(Schema):
 
 class UpdateRoleRequest(Schema):
     target_user_id: str
-    new_role:       str
-
+    new_role_id:    int
+    
+class RoleSchema(Schema):
+    name:        str
+    description: str = ""
+    permissions: dict
 
 # ═══════════════════════════════════════════════════════════════════════
 # 1. AUTH (PUBLIC)
@@ -684,18 +686,22 @@ def auth_callback(request, state: str, code: str):
     # Save OAuth credentials under the canonical user_id
     save_session(canonical_user_id, credentials, display_name=display_name, email=email)
 
-    # Update or create UserProfile — never demote an existing admin
-    assigned_role = ROLE_SUPER_ADMIN if email in SUPER_ADMIN_EMAILS else ROLE_USER # <--- Updated to 'in SUPER_ADMIN_EMAILS'
+    # Assign dynamic PlatformRole (Super Admin if in list, else User)
+    role_name = "Super Admin" if email in SUPER_ADMIN_EMAILS else "User"
+    try:
+        assigned_role = PlatformRole.objects.get(name=role_name)
+    except PlatformRole.DoesNotExist:
+        assigned_role = None
+
     profile_obj, created = UserProfile.objects.update_or_create(
         user_id=canonical_user_id,
         defaults={"display_name": display_name, "email": email},
     )
-    if created:
-        profile_obj.role = assigned_role
-        profile_obj.save(update_fields=["role"])
-    elif assigned_role == ROLE_SUPER_ADMIN and profile_obj.role != ROLE_SUPER_ADMIN:
-        profile_obj.role = ROLE_SUPER_ADMIN
-        profile_obj.save(update_fields=["role"])
+    
+    # Only assign default role if they don't have one, or if they are a forced Super Admin
+    if created or not profile_obj.platform_role or (role_name == "Super Admin" and profile_obj.platform_role.name != "Super Admin"):
+        profile_obj.platform_role = assigned_role
+        profile_obj.save(update_fields=["platform_role"])
 
     from django.utils import timezone
     profile_obj.last_seen = timezone.now()
@@ -715,10 +721,11 @@ def get_access_token(request, user_id: str):
     session = load_session(user_id)
     token   = session["token"] if session else ""
     try:
-        p = UserProfile.objects.get(user_id=user_id)
+        p = UserProfile.objects.select_related('platform_role').get(user_id=user_id)
         display_name = p.display_name
         email        = p.email
-        role         = p.role
+        role_name    = p.platform_role.name if p.platform_role else "User"
+        permissions  = p.platform_role.permissions if p.platform_role else {}
     except UserProfile.DoesNotExist:
         if session:
             s_obj        = OAuthSession.objects.get(user_id=user_id)
@@ -727,13 +734,15 @@ def get_access_token(request, user_id: str):
         else:
             display_name = ""
             email        = ""
-        role = ROLE_USER
+        role_name   = "User"
+        permissions = {}
 
     return {
         "access_token": token,
         "display_name": display_name,
         "email":        email,
-        "role":         role,
+        "role":         role_name,
+        "permissions":  permissions, # <--- React will use this to hide/show tabs!
     }
 
 
@@ -1189,8 +1198,8 @@ def get_analytics(request, user_id: str):
 @api.post("/kb/create", auth=lumina_auth)
 def create_knowledge_base(request, payload: CreateKBRequest):
     user_id = request.auth
-    if not require_admin(user_id):
-        return api.create_response(request, {"detail": "Admins only."}, status=403)
+    if not has_permission(user_id, "can_manage_kbs"):
+        return api.create_response(request, {"detail": "Requires KB management permissions."}, status=403)
 
     try:
         actor = UserProfile.objects.get(user_id=user_id)
@@ -1260,8 +1269,8 @@ def create_and_ingest_kb(request, user_id: str, payload: CreateKBRequest):
     """
     if request.auth != user_id:
         return api.create_response(request, {"detail": "Forbidden"}, status=403)
-    if not require_admin(user_id):
-        return api.create_response(request, {"detail": "Admins only."}, status=403)
+    if not has_permission(user_id, "can_manage_kbs"):
+        return api.create_response(request, {"detail": "Requires KB management permissions."}, status=403)
     if not payload.folder_ids:
         return api.create_response(request, {"detail": "At least one folder required."}, status=400)
 
@@ -1485,8 +1494,8 @@ def list_knowledge_bases(request):
 @api.post("/kb/{kb_id}/add-member", auth=lumina_auth)
 def add_kb_member(request, kb_id: int, email: str, role: str = KB_ROLE_VIEWER):
     user_id = request.auth
-    if not require_admin(user_id):
-        return api.create_response(request, {"detail": "Admins only."}, status=403)
+    if not has_permission(user_id, "can_manage_kbs"):
+        return api.create_response(request, {"detail": "Requires KB management permissions."}, status=403)
 
     try:
         kb = KnowledgeBase.objects.get(id=kb_id)
@@ -1518,8 +1527,8 @@ def add_kb_member(request, kb_id: int, email: str, role: str = KB_ROLE_VIEWER):
 @api.delete("/kb/{kb_id}", auth=lumina_auth)
 def deactivate_kb(request, kb_id: int):
     user_id = request.auth
-    if not require_admin(user_id):
-        return api.create_response(request, {"detail": "Admins only."}, status=403)
+    if not has_permission(user_id, "can_manage_kbs"):
+        return api.create_response(request, {"detail": "Requires KB management permissions."}, status=403)
     try:
         kb = KnowledgeBase.objects.get(id=kb_id)
         kb.is_active = False
@@ -1538,8 +1547,8 @@ def deactivate_kb(request, kb_id: int):
 @api.get("/admin/users", auth=lumina_auth)
 def admin_list_users(request):
     user_id = request.auth
-    if not require_super_admin(user_id):
-        return api.create_response(request, {"detail": "Super admin only."}, status=403)
+    if not has_permission(user_id, "can_manage_users"):
+        return api.create_response(request, {"detail": "Requires user management permissions."}, status=403)
 
     from django.db.models import Count, Q, Subquery, OuterRef
     from django.db.models.functions import Coalesce
@@ -1571,40 +1580,75 @@ def admin_list_users(request):
 @api.post("/admin/update-role", auth=lumina_auth)
 def admin_update_role(request, payload: UpdateRoleRequest):
     actor_id = request.auth
-    if not require_super_admin(actor_id):
-        return api.create_response(request, {"detail": "Super admin only."}, status=403)
-
-    if payload.new_role not in (ROLE_ADMIN, ROLE_USER):
-        return api.create_response(request, {"detail": "Role must be 'admin' or 'user'."}, status=400)
+    if not has_permission(actor_id, "can_manage_roles"):
+        return api.create_response(request, {"detail": "Requires role management permissions."}, status=403)
 
     try:
         target = UserProfile.objects.get(user_id=payload.target_user_id)
-    except UserProfile.DoesNotExist:
-        return api.create_response(request, {"detail": "User not found."}, status=404)
+        new_role = PlatformRole.objects.get(id=payload.new_role_id)
+    except (UserProfile.DoesNotExist, PlatformRole.DoesNotExist):
+        return api.create_response(request, {"detail": "User or Role not found."}, status=404)
 
-    if target.role == ROLE_SUPER_ADMIN:
-        return api.create_response(request, {"detail": "Cannot change super admin role."}, status=403)
+    if target.user_id == actor_id:
+        return api.create_response(request, {"detail": "Cannot change your own role."}, status=403)
 
-    old_role    = target.role
-    target.role = payload.new_role
-    target.save(update_fields=["role"])
+    old_role_name = target.platform_role.name if target.platform_role else "Unknown"
+    target.platform_role = new_role
+    target.save(update_fields=["platform_role"])
 
     actor = UserProfile.objects.get(user_id=actor_id)
-    audit(
-        actor_id, actor.email,
-        action="promote_to_admin" if payload.new_role == ROLE_ADMIN else "demote_to_user",
-        target_user_id=target.user_id,
-        target_email=target.email,
-        detail={"old_role": old_role, "new_role": payload.new_role},
-    )
-    return {"success": True, "user_id": target.user_id, "email": target.email, "new_role": target.role}
+    audit(actor_id, actor.email, f"changed_role_to_{new_role.name}", target.user_id, target.email, {"old": old_role_name, "new": new_role.name})
+    return {"success": True}
 
+@api.get("/admin/roles", auth=lumina_auth)
+def admin_list_roles(request):
+    if not has_permission(request.auth, "can_manage_roles"):
+        return api.create_response(request, {"detail": "Forbidden"}, status=403)
+    
+    roles = PlatformRole.objects.all().order_by("id")
+    return [{"id": r.id, "name": r.name, "description": r.description, "is_system": r.is_system, "permissions": r.permissions} for r in roles]
+
+@api.post("/admin/roles", auth=lumina_auth)
+def admin_create_role(request, payload: RoleSchema):
+    actor_id = request.auth
+    if not has_permission(actor_id, "can_manage_roles"):
+        return api.create_response(request, {"detail": "Forbidden"}, status=403)
+        
+    if PlatformRole.objects.filter(name__iexact=payload.name).exists():
+        return api.create_response(request, {"detail": "Role name exists."}, status=400)
+        
+    role = PlatformRole.objects.create(name=payload.name, description=payload.description, permissions=payload.permissions)
+    actor = UserProfile.objects.get(user_id=actor_id)
+    audit(actor_id, actor.email, "created_role", detail={"role": role.name})
+    return {"success": True, "id": role.id}
+
+@api.put("/admin/roles/{role_id}", auth=lumina_auth)
+def admin_update_role_def(request, role_id: int, payload: RoleSchema):
+    actor_id = request.auth
+    if not has_permission(actor_id, "can_manage_roles"):
+        return api.create_response(request, {"detail": "Forbidden"}, status=403)
+        
+    try:
+        role = PlatformRole.objects.get(id=role_id)
+        if role.is_system and role.name in ["Super Admin", "User"]:
+            return api.create_response(request, {"detail": "Core system roles cannot be modified."}, status=403)
+            
+        role.name = payload.name
+        role.description = payload.description
+        role.permissions = payload.permissions
+        role.save()
+        
+        actor = UserProfile.objects.get(user_id=actor_id)
+        audit(actor_id, actor.email, "updated_role", detail={"role": role.name})
+        return {"success": True}
+    except PlatformRole.DoesNotExist:
+        return api.create_response(request, {"detail": "Role not found."}, status=404)
 
 @api.get("/admin/analytics", auth=lumina_auth)
 def admin_platform_analytics(request):
     user_id = request.auth
-    if not require_super_admin(user_id):
-        return api.create_response(request, {"detail": "Super admin only."}, status=403)
+    if not has_permission(user_id, "can_manage_users"):
+        return api.create_response(request, {"detail": "Requires user management permissions."}, status=403)
 
     from django.db.models import Avg, Count, Q
     from django.db.models.functions import TruncDate
@@ -1651,8 +1695,8 @@ def admin_platform_analytics(request):
 @api.get("/admin/audit-log", auth=lumina_auth)
 def admin_audit_log(request, limit: int = 100):
     user_id = request.auth
-    if not require_super_admin(user_id):
-        return api.create_response(request, {"detail": "Super admin only."}, status=403)
+    if not has_permission(user_id, "can_manage_users"):
+        return api.create_response(request, {"detail": "Requires user management permissions."}, status=403)
 
     logs = AdminAuditLog.objects.all().order_by("-timestamp")[:limit]
     return [
@@ -1671,8 +1715,8 @@ def admin_audit_log(request, limit: int = 100):
 @api.get("/admin/kb-list", auth=lumina_auth)
 def admin_list_all_kbs(request):
     user_id = request.auth
-    if not require_super_admin(user_id):
-        return api.create_response(request, {"detail": "Super admin only."}, status=403)
+    if not has_permission(user_id, "can_manage_users"):
+        return api.create_response(request, {"detail": "Requires user management permissions."}, status=403)
 
     kbs = KnowledgeBase.objects.all().order_by("-created_at")
     result = []
@@ -1706,8 +1750,9 @@ def delete_session(request, user_id: str, session_id: int):
         
         # Security: Only the owner (or KB creator) can delete a session
         if session.kb:
-            if session.kb.created_by != user_id and not require_admin(user_id):
-                return api.create_response(request, {"detail": "Only the Knowledge Base creator can delete this shared chat."}, status=403)
+            if session.kb:
+                if session.kb.created_by != user_id and not has_permission(user_id, "can_manage_kbs"):
+                    return api.create_response(request, {"detail": "Only the Knowledge Base creator can delete this shared chat."}, status=403)
         else:
             if session.user_id != user_id:
                 return api.create_response(request, {"detail": "Not your session."}, status=403)
