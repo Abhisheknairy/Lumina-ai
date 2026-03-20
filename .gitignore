@@ -1,19 +1,25 @@
-# Python / Backend
+# Environments and caches
 .venv/
 venv/
+env/
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
+
+# Node
+node_modules/
+dist/
+build/
+
+# Database and Vector Store
+db.sqlite3
 chroma_db/
-logs/
+
+# Environment Variables (NEVER PUSH THESE)
+.env
+.env.local
+.env.*
 client_secret.json
 
-# Node / React Frontend
-rag-ui/node_modules/
-rag-ui/dist/
-npm-debug.log*
-
-# Environment Variables
-.env
+# OS generated files
+.DS_Store
+Thumbs.db
