@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Send, Loader2, Paperclip, FileText, ExternalLink, CheckCircle, AlertCircle, X, TicketCheck, FolderCheck } from 'lucide-react';
+import { Send, Loader2, Paperclip, FileText, ExternalLink, CheckCircle, AlertCircle, X, TicketCheck, FolderCheck, Trash2 } from 'lucide-react';
 import AppLayout from '../components/AppLayout';
 import DrivePicker from '../components/DrivePicker';
 
@@ -69,185 +69,27 @@ function inlineFmt(text) {
   return parts.length ? parts : text;
 }
 
-// ── Ticket comment modal ──────────────────────────────────────────────
-function TicketModal({ message, userId, onClose }) {
-  const [comment, setComment] = useState('');
-  const [state,   setState]   = useState('idle'); // idle | loading | success | error
-  const textRef = useRef(null);
-
-  useEffect(() => { setTimeout(() => textRef.current?.focus(), 80); }, []);
-
-  const submit = async () => {
-    setState('loading');
-    try {
-      const res = await authFetch(userId, `/api/raise-ticket/${userId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          interaction_id: message.interaction_id,
-          user_query: '',
-          ai_response: message.content,
-          priority: 'medium',
-          comment,
-        }),
-      });
-      if (!res.ok) throw new Error();
-      setState('success');
-      setTimeout(onClose, 1400);
-    } catch {
-      setState('error');
-      setTimeout(() => setState('idle'), 3000);
-    }
-  };
-
-  return (
-    <>
-      {/* Backdrop */}
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)' }} />
-
-      {/* Modal */}
-      <div style={{
-        position: 'fixed', top: '50%', left: '50%', zIndex: 1001,
-        transform: 'translate(-50%, -50%)',
-        width: 420, maxWidth: '92vw',
-        background: 'var(--bg-2)',
-        border: '1px solid var(--border)',
-        borderRadius: 14,
-        boxShadow: '0 24px 64px rgba(0,0,0,0.4)',
-        overflow: 'hidden',
-        animation: 'modalIn 0.18s cubic-bezier(.4,0,.2,1)',
-      }}>
-        {/* Header */}
-        <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid var(--border-sub)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(200,169,110,0.12)', border: '1px solid var(--gold-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <TicketCheck size={15} style={{ color: 'var(--gold)' }} />
-            </div>
-            <div>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--text-1)', fontFamily: 'var(--font-display)' }}>Raise a Ticket</p>
-              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-body)' }}>Add a comment before submitting</p>
-            </div>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4, borderRadius: 6, display: 'flex', flexShrink: 0 }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-2)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-3)'; }}>
-            <X size={15} />
-          </button>
-        </div>
-
-        {/* AI response preview */}
-        <div style={{ margin: '14px 20px 0', padding: '10px 12px', background: 'var(--bg-3)', border: '1px solid var(--border-sub)', borderRadius: 8, maxHeight: 80, overflow: 'hidden', position: 'relative' }}>
-          <p style={{ margin: 0, fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-body)', lineHeight: 1.6, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-            {message.content}
-          </p>
-          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 24, background: 'linear-gradient(transparent, var(--bg-3))' }} />
-        </div>
-
-        {/* Comment box */}
-        <div style={{ padding: '14px 20px' }}>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: 7, fontFamily: 'var(--font-body)' }}>
-            Comment
-          </label>
-          <textarea
-            ref={textRef}
-            value={comment}
-            onChange={e => setComment(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(); }}
-            placeholder="Describe the issue, expected behaviour, or any additional context…"
-            rows={4}
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              padding: '10px 12px',
-              background: 'var(--bg-3)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              color: 'var(--text-1)',
-              fontSize: 13, fontFamily: 'var(--font-body)',
-              lineHeight: 1.65, resize: 'vertical',
-              outline: 'none', transition: 'border-color 0.15s',
-            }}
-            onFocus={e => e.target.style.borderColor = 'var(--gold)'}
-            onBlur={e => e.target.style.borderColor = 'var(--border)'}
-          />
-          <p style={{ margin: '5px 0 0', fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-body)' }}>⌘ Enter to submit</p>
-        </div>
-
-        {/* Footer */}
-        <div style={{ padding: '0 20px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-          {state === 'error' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--danger)', fontFamily: 'var(--font-body)' }}>
-              <AlertCircle size={13} /> Failed to raise ticket
-            </div>
-          )}
-          {state === 'success' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#4ade80', fontFamily: 'var(--font-body)' }}>
-              <CheckCircle size={13} /> Ticket raised!
-            </div>
-          )}
-          {(state === 'idle' || state === 'loading') && <span />}
-
-          <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
-            <button onClick={onClose}
-              style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid var(--border)', background: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-2)', fontFamily: 'var(--font-body)', transition: 'all 0.1s' }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; }}>
-              Cancel
-            </button>
-            <button onClick={submit} disabled={state === 'loading' || state === 'success'}
-              style={{
-                padding: '8px 20px', borderRadius: 7, border: 'none',
-                background: state === 'success' ? 'rgba(74,222,128,0.15)' : 'var(--gold)',
-                cursor: state === 'loading' || state === 'success' ? 'not-allowed' : 'pointer',
-                fontSize: 13, fontWeight: 500,
-                color: state === 'success' ? '#4ade80' : '#0b0b0d',
-                fontFamily: 'var(--font-body)',
-                display: 'flex', alignItems: 'center', gap: 7,
-                transition: 'all 0.15s', opacity: state === 'loading' ? 0.7 : 1,
-              }}>
-              {state === 'loading'
-                ? <><Loader2 size={13} style={{ animation: 'spin 0.7s linear infinite' }} /> Raising…</>
-                : state === 'success'
-                  ? <><CheckCircle size={13} /> Raised!</>
-                  : <><TicketCheck size={13} /> Raise Ticket</>}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <style>{`@keyframes modalIn { from { opacity:0; transform:translate(-50%,-48%) scale(0.97); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }`}</style>
-    </>
-  );
-}
-
 // ── Ticket button ─────────────────────────────────────────────────────
 function TicketBtn({ message, userId }) {
-  const [modalOpen, setModalOpen] = useState(false);
-  const [raised,    setRaised]    = useState(false);
-
+  const [state, setState] = useState('idle');
+  const raise = async () => {
+    if (!message.interaction_id) return;
+    setState('loading');
+    try {
+      const res = await authFetch(userId, `/api/raise-ticket/${userId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interaction_id: message.interaction_id, user_query: '', ai_response: message.content, priority: 'medium' }) });
+      if (!res.ok) throw new Error();
+      setState('success');
+    } catch { setState('error'); setTimeout(() => setState('idle'), 3000); }
+  };
   if (!message.interaction_id) return null;
-
-  if (raised) return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 10, padding: '4px 10px', background: 'var(--success-dim)', border: '1px solid var(--success-bdr)', borderRadius: 5, fontSize: 11, color: 'var(--success)' }}>
-      <CheckCircle size={11} /> Ticket raised
-    </div>
-  );
-
+  if (state === 'success') return <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 10, padding: '4px 10px', background: 'var(--success-dim)', border: '1px solid var(--success-bdr)', borderRadius: 5, fontSize: 11, color: 'var(--success)' }}><CheckCircle size={11} /> Ticket raised</div>;
   return (
-    <>
-      <button onClick={() => setModalOpen(true)}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 10, padding: '4px 10px', background: 'none', border: '1px solid var(--border)', borderRadius: 5, fontSize: 11, color: 'var(--text-3)', cursor: 'pointer', transition: 'all 0.1s', fontFamily: 'var(--font-body)' }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold-border)'; e.currentTarget.style.color = 'var(--gold)'; e.currentTarget.style.background = 'var(--gold-dim)'; }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-3)'; e.currentTarget.style.background = 'none'; }}>
-        <TicketCheck size={11} /> Raise ticket
-      </button>
-      {modalOpen && (
-        <TicketModal
-          message={message}
-          userId={userId}
-          onClose={() => { setModalOpen(false); setRaised(true); }}
-        />
-      )}
-    </>
+    <button onClick={raise} disabled={state === 'loading'}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 10, padding: '4px 10px', background: 'none', border: '1px solid var(--border)', borderRadius: 5, fontSize: 11, color: 'var(--text-3)', cursor: 'pointer', transition: 'all 0.1s', fontFamily: 'var(--font-body)' }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--warn-bdr)'; e.currentTarget.style.color = 'var(--warn)'; e.currentTarget.style.background = 'var(--warn-dim)'; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-3)'; e.currentTarget.style.background = 'none'; }}>
+      {state === 'loading' ? <><Loader2 size={11} style={{ animation: 'spin 0.7s linear infinite' }} />Raising…</> : <><TicketCheck size={11} />Raise ticket</>}
+    </button>
   );
 }
 
@@ -305,6 +147,10 @@ export default function Chat() {
   const [sessions,        setSessions]        = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [activeSession,   setActiveSession]   = useState(null);
+  
+  // Custom Delete Modal State
+  const [sessionToDelete, setSessionToDelete] = useState(null);
+  const [isDeleting,      setIsDeleting]      = useState(false);
 
   useEffect(() => { if (!userId) navigate('/'); }, [userId, navigate]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
@@ -357,6 +203,25 @@ export default function Chat() {
 
   const newChat = () => { setMessages([]); setConnected(null); setActiveSession(null); setActiveKbId(null); setIsSharedSession(false); setIngestPhase(null); setIngestProgress(null); setIngestMsg(''); setIngestErr(''); setInput(''); inputRef.current?.focus(); };
 
+  const executeDeleteSession = async () => {
+    if (!sessionToDelete) return;
+    setIsDeleting(true);
+    try {
+      const res = await authFetch(userId, `/api/sessions/${userId}/${sessionToDelete}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.detail || 'Failed to delete');
+      }
+      if (activeSession === sessionToDelete) newChat();
+      await fetchSessions();
+    } catch (err) {
+      alert(err.message || 'Could not delete session.');
+    } finally {
+      setIsDeleting(false);
+      setSessionToDelete(null);
+    }
+  };
+
   const handleDriveSelect = async (item) => {
     setShowPicker(false); setIngestPhase('connecting'); setIngestProgress(null); setIngestMsg(''); setIngestErr(''); setMessages([]); setActiveSession(null); setConnected({ id: item.id, name: item.name });
     const url = activeKbId ? `/api/ingest-item/${userId}/${item.id}?kb_id=${activeKbId}` : `/api/ingest-item/${userId}/${item.id}`;
@@ -405,7 +270,19 @@ export default function Chat() {
   };
 
   return (
-    <AppLayout userId={userId} displayName={displayName} userEmail={userEmail} role={userRole} profileLoading={profileLoading} onNewChat={newChat} sessionHistory={sessions} sessionsLoading={sessionsLoading} activeSessionId={activeSession} onLoadSession={loadSession}>
+    <AppLayout 
+      userId={userId} 
+      displayName={displayName} 
+      userEmail={userEmail} 
+      role={userRole} 
+      profileLoading={profileLoading} 
+      onNewChat={newChat} 
+      sessionHistory={sessions} 
+      sessionsLoading={sessionsLoading} 
+      activeSessionId={activeSession} 
+      onLoadSession={loadSession}
+      onDeleteSession={(id) => setSessionToDelete(id)} 
+    >
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)' }}>
 
         {/* Messages */}
@@ -546,7 +423,31 @@ export default function Chat() {
           </div>
         </div>
       </div>
+      
       {showPicker && <DrivePicker userId={userId} onSelect={handleDriveSelect} onClose={() => setShowPicker(false)} />}
+      
+      {/* ── Custom Delete Confirmation Modal ── */}
+      {sessionToDelete && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', boxShadow: 'var(--shadow-md)', width: '100%', maxWidth: 400, animation: 'fadein 0.2s ease' }}>
+            <div style={{ padding: '20px 24px' }}>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 600, color: 'var(--text-1)', margin: '0 0 8px' }}>Delete conversation?</h3>
+              <p style={{ fontSize: 13, color: 'var(--text-3)', margin: 0, fontFamily: 'var(--font-body)', lineHeight: 1.5 }}>
+                This will permanently remove this conversation for you (and all members if it's a shared Knowledge Base). This action cannot be undone.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 10, padding: '16px 24px', background: 'var(--bg-3)', borderTop: '1px solid var(--border-sub)' }}>
+              <button onClick={() => setSessionToDelete(null)} disabled={isDeleting} className="btn-ghost" style={{ flex: 1, justifyContent: 'center' }}>Cancel</button>
+              <button onClick={executeDeleteSession} disabled={isDeleting} style={{ flex: 1, justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 8, background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: isDeleting ? 'not-allowed' : 'pointer', opacity: isDeleting ? 0.7 : 1, transition: 'background 0.2s' }}
+                onMouseEnter={e => { if(!isDeleting) e.currentTarget.style.background = '#e65c5c'; }}
+                onMouseLeave={e => { if(!isDeleting) e.currentTarget.style.background = 'var(--danger)'; }}>
+                {isDeleting ? <Loader2 size={13} style={{ animation: 'spin 0.7s linear infinite' }} /> : <Trash2 size={13} />}
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }

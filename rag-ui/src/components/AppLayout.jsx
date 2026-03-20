@@ -49,8 +49,8 @@ export default function AppLayout({
     if (role && role !== 'user') sessionStorage.setItem('lumina_role', role);
   }, [userEmail, displayName, role]);
 
-  const cachedEmail = userEmail || sessionStorage.getItem('lumina_email') || '';
-  const cachedName  = displayName || sessionStorage.getItem('lumina_name') || '';
+  const cachedEmail   = userEmail || sessionStorage.getItem('lumina_email') || '';
+  const cachedName    = displayName || sessionStorage.getItem('lumina_name') || '';
   const effectiveRole = (role && role !== 'user') ? role : (sessionStorage.getItem('lumina_role') || 'user');
   // --------------------------
 
@@ -273,8 +273,6 @@ export default function AppLayout({
 
         {/* ── User bottom ── */}
         <div style={{ flexShrink: 0, padding: open ? '8px' : '8px 0', borderTop: '1px solid var(--border-sub)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-
-          {/* Settings gear — always visible */}
           
           <div style={{ position: 'relative', flex: open ? 1 : 'unset' }}>
             <button onClick={() => setProfileOpen(!profileOpen)}
@@ -304,11 +302,22 @@ export default function AppLayout({
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setProfileOpen(false)} />
                 <div style={{ position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, width: 220, zIndex: 50, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', boxShadow: 'var(--shadow-md)' }}>
+                  
                   <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-sub)' }}>
                     <p style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-1)', margin: '0 0 2px', fontFamily: 'var(--font-body)' }}>{name || 'Account'}</p>
                     <p style={{ fontSize: 10, color: 'var(--text-3)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-body)' }}>{userEmail}</p>
                     {isSA && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: 10, color: 'var(--purple)', background: 'rgba(167,139,250,0.1)', padding: '2px 7px', borderRadius: 4, fontFamily: 'var(--font-body)' }}><ShieldCheck size={9} />Super Admin</span>}
                   </div>
+                  
+                  <button onClick={() => { setProfileOpen(false); setSettingsOpen(true); }}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-2)', fontFamily: 'var(--font-body)', transition: 'background 0.1s' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; }}>
+                    <Cog size={13} /> Settings
+                  </button>
+                  
+                  <div style={{ height: 1, background: 'var(--border-sub)', margin: '0 10px' }} />
+                  
                   <button onClick={() => { 
                     sessionStorage.removeItem('lumina_role');
                     sessionStorage.removeItem('lumina_email');
@@ -316,19 +325,12 @@ export default function AppLayout({
                     setProfileOpen(false); 
                     navigate('/'); 
                   }}
-                  <button onClick={() => { setProfileOpen(false); setSettingsOpen(true); }}
-                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-2)', fontFamily: 'var(--font-body)', transition: 'background 0.1s' }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--text-2)'; }}>
-                    <Cog size={13} /> Settings
-                  </button>
-                  <div style={{ height: 1, background: 'var(--border-sub)', margin: '0 10px' }} />
-                  <button onClick={() => { setProfileOpen(false); navigate('/'); }}
                     style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--danger)', fontFamily: 'var(--font-body)', transition: 'background 0.1s' }}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--danger-dim)'}
                     onMouseLeave={e => e.currentTarget.style.background = 'none'}>
                     <LogOut size={13} /> Sign out
                   </button>
+
                 </div>
               </>
             )}
@@ -373,13 +375,16 @@ export default function AppLayout({
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
-      <Settings
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        displayName={displayName}
-        userEmail={userEmail}
-        role={role}
-      />
+      {/* Renders the Settings Modal if it's imported and functional */}
+      {Settings && (
+        <Settings
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          displayName={displayName}
+          userEmail={userEmail}
+          role={role}
+        />
+      )}
     </div>
   );
 }
