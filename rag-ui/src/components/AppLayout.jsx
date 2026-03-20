@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
-const SUPER_ADMIN_EMAIL = 'n.abhishek@isteer.com';
+const SUPER_ADMIN_EMAILS = ['n.abhishek@isteer.com', 'debasis.sahoo@isteer.com'];
 const SIDEBAR_W = 240;
 const SIDEBAR_COLLAPSED_W = 68;
 
@@ -46,7 +46,7 @@ export default function AppLayout({
   const isCollab     = path === '/collaboration';
   const isAdmin      = path === '/admin';
 
-  const isSA  = role === 'super_admin' || userEmail === SUPER_ADMIN_EMAIL;
+  const isSA  = role === 'super_admin' || SUPER_ADMIN_EMAILS.includes(userEmail);
   const isAdm = role === 'super_admin' || role === 'admin';
   const name  = resolved(displayName, userEmail);
   const ini   = profileLoading ? '·' : initials(displayName, userEmail);

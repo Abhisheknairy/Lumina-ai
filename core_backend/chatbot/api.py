@@ -33,7 +33,7 @@ from .models import (
     ChatSession, InteractionLog, SourceDocument,
     UserProfile, OAuthSession,
     KnowledgeBase, KBMembership, AdminAuditLog,
-    SUPER_ADMIN_EMAIL, ROLE_SUPER_ADMIN, ROLE_ADMIN, ROLE_USER,
+    SUPER_ADMIN_EMAILS, ROLE_SUPER_ADMIN, ROLE_ADMIN, ROLE_USER, # <--- Updated to EMAILS
     KB_ROLE_VIEWER, KB_ROLE_EDITOR,
 )
 
@@ -685,7 +685,7 @@ def auth_callback(request, state: str, code: str):
     save_session(canonical_user_id, credentials, display_name=display_name, email=email)
 
     # Update or create UserProfile — never demote an existing admin
-    assigned_role = ROLE_SUPER_ADMIN if email == SUPER_ADMIN_EMAIL else ROLE_USER
+    assigned_role = ROLE_SUPER_ADMIN if email in SUPER_ADMIN_EMAILS else ROLE_USER # <--- Updated to 'in SUPER_ADMIN_EMAILS'
     profile_obj, created = UserProfile.objects.update_or_create(
         user_id=canonical_user_id,
         defaults={"display_name": display_name, "email": email},
