@@ -412,7 +412,7 @@ MIT — see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-Built by **Abhishek N Nairy** · [iSteer Technologies](https://isteer.com)
+Built by **Abhishek N Nairy** · 
 
 <sub>Gemini 2.0 Flash · BAAI/bge-large-en-v1.5 · ChromaDB · Django Ninja · React 19</sub>
 
